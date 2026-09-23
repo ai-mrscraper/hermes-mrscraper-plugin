@@ -262,6 +262,8 @@ def _normalize_urls(raw: Any) -> List[str]:
     normalized = [str(item).strip() for item in values if str(item).strip()]
     if not normalized:
         raise MrScraperError("urls must contain at least one nonblank URL")
+    if any(not is_safe_url(url) for url in normalized):
+        raise MrScraperError("urls must contain only safe HTTP or HTTPS URLs")
     return normalized
 
 

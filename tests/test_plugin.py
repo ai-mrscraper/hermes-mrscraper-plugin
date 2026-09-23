@@ -48,6 +48,8 @@ def test_rendered_request_rejects_unsafe_url_and_redacts_token(tmp_path, monkeyp
 
     with pytest.raises(client.MrScraperError, match="safe HTTP or HTTPS"):
         rendered.build_rendered_request({"url": "file:///etc/passwd"})
+    with pytest.raises(client.MrScraperError, match="safe HTTP or HTTPS"):
+        module.mrscraper_tools._normalize_urls(["https://example.com", "file:///etc/passwd"])
 
     monkeypatch.setattr(rendered, "is_safe_url", lambda _url: True)
     params, body, timeout = rendered.build_rendered_request({"url": "https://example.com"})
