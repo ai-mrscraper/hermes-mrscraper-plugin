@@ -6,11 +6,7 @@ import json
 from typing import Any, Dict, List, Mapping, Optional
 
 from agent.web_search_provider import WebSearchProvider
-from .rendered import fetch_rendered_html
-from .client import is_mrscraper_available
-from .mrscraper_tools import search_google_serp
-from tools.url_safety import is_safe_url
-from tools.website_policy import check_website_access
+from .client import MrScraperClient, MrScraperError, is_mrscraper_available
 
 
 def _nested(value: Any, *path: str) -> Any:
@@ -24,6 +20,9 @@ def _nested(value: Any, *path: str) -> Any:
 def _serp_items(payload: Any) -> List[Mapping[str, Any]]:
     """Find the result list across currently observed SERP response envelopes."""
     candidates = (
+        payload if isinstance(payload, list) else None,
+        _nested(payload, "data") if isinstance(_nested(payload, "data"), list) else None,
+        _nested(payload, "web"),
         _nested(payload, "data", "web"),
         _nested(payload, "data", "organic"),
         _nested(payload, "data", "organic_results"),
@@ -76,14 +75,7 @@ class MrScraperWebSearchProvider(WebSearchProvider):
 
     def search(self, query: str, limit: int = 5) -> Dict[str, Any]:
         try:
-            payload = search_google_serp({
-                "query": query,
-                "region": "us",
-                "language": "en",
-                "page": 1,
-                "format": "json",
-                "render_js": False,
-            })
+            payload = MrScraperClient().web_search({"url": query, "raw": False})["data"]
             items = _serp_items(payload)[: max(1, int(limit))]
             web = []
             for position, item in enumerate(items, start=1):
@@ -96,30 +88,19 @@ class MrScraperWebSearchProvider(WebSearchProvider):
                     "position": int(item.get("position") or position),
                 })
             return {"success": True, "data": {"web": web}}
-        except Exception as exc:  # noqa: BLE001 — provider result contract
+        except MrScraperError as exc:
             return {"success": False, "error": f"MrScraper search failed: {exc}"}
 
     def extract(self, urls: List[str], **kwargs: Any) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []
         requested_format = str(kwargs.get("format") or "markdown").lower()
         for url in urls:
-            if not is_safe_url(url):
-                results.append({"url": url, "title": "", "error": "Unsafe URL"})
-                continue
-            blocked = check_website_access(url)
-            if blocked:
-                results.append({
-                    "url": url,
-                    "title": "",
-                    "error": blocked.get("message") or "Website access blocked",
-                })
-                continue
             try:
-                payload = fetch_rendered_html({
+                payload = MrScraperClient().scraper_api({
                     "url": url,
                     "html": requested_format != "markdown",
                     "markdown": requested_format == "markdown",
-                })
+                })["data"]
                 content, title, metadata = _rendered_content(payload)
                 results.append({
                     "url": url,
@@ -128,7 +109,7 @@ class MrScraperWebSearchProvider(WebSearchProvider):
                     "raw_content": content,
                     "metadata": metadata,
                 })
-            except Exception as exc:  # noqa: BLE001 — per-URL error contract
+            except MrScraperError as exc:
                 results.append({
                     "url": url,
                     "title": "",
@@ -140,7 +121,7 @@ class MrScraperWebSearchProvider(WebSearchProvider):
         return {
             "name": "MrScraper",
             "badge": "paid",
-            "tag": "Google SERP, rendered pages, and structured extraction",
+            "tag": "Google search and page retrieval",
             "env_vars": [
                 {
                     "key": "MRSCRAPER_API_TOKEN",
