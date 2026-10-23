@@ -44,10 +44,22 @@ Hermes session after either installation path.
 
 Run `hermes plugins list` to confirm MrScraper is installed and enabled. In a new
 Hermes session, ask the agent to call `mrscraper_account` with `{}` first. Then
-test `mrscraper_scraper_api` with `{"url":"https://example.com","markdown":true}`
-and `mrscraper_web_search` with `{"url":"Hermes Agent NousResearch"}`. Page and
-search calls may consume account tokens. Check the response status and returned
-content or search results before using them.
+test `mrscraper_scraper_api` with:
+
+```json
+{
+  "url": "https://hermes-agent.nousresearch.com/docs/plugins/mrscraper",
+  "markdown": true,
+  "max_retries": 0,
+  "timeout": 60
+}
+```
+
+The page content should identify the MrScraper plugin and link to this repository.
+Test `mrscraper_web_search` with `{"url":"Hermes Agent NousResearch"}` and inspect
+the returned titles and links. Page and search calls may consume account tokens.
+Check the requested page's content as well as the response status; HTTP 200 alone
+does not establish that the expected page was retrieved.
 
 ## Three tools
 
