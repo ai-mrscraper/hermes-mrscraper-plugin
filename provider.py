@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping
 
 from agent.web_search_provider import WebSearchProvider
 from .client import MrScraperClient, MrScraperError, is_mrscraper_available
@@ -37,20 +36,25 @@ def _serp_items(payload: Any) -> List[Mapping[str, Any]]:
 
 
 def _rendered_content(payload: Any) -> tuple[str, str, Dict[str, Any]]:
-    """Extract content/title metadata while retaining the raw response."""
+    """Prefer REST page fields over an unrelated nested ``data`` object."""
     if isinstance(payload, str):
-        return payload, "", {}
+        if payload.strip():
+            return payload, "", {}
+        raise MrScraperError("MrScraper returned no page content.")
     if not isinstance(payload, Mapping):
-        return json.dumps(payload, ensure_ascii=False), "", {}
+        raise MrScraperError("MrScraper returned no page content.")
 
-    data = payload.get("data") if isinstance(payload.get("data"), Mapping) else payload
-    assert isinstance(data, Mapping)
-    content = data.get("markdown") or data.get("html") or data.get("content")
-    if content is None:
-        content = json.dumps(payload, ensure_ascii=False)
-    metadata = data.get("metadata") if isinstance(data.get("metadata"), Mapping) else {}
-    title = str(data.get("title") or metadata.get("title") or "")
-    return str(content), title, dict(metadata)
+    nested = payload.get("data")
+    candidates = (payload, nested) if isinstance(nested, Mapping) else (payload,)
+    for data in candidates:
+        if data.get("error") or data.get("success") is False:
+            raise MrScraperError("MrScraper reported a page retrieval failure.")
+        content = data.get("markdown") or data.get("html") or data.get("content")
+        if isinstance(content, str) and content.strip():
+            metadata = data.get("metadata") if isinstance(data.get("metadata"), Mapping) else {}
+            title = str(data.get("title") or metadata.get("title") or "")
+            return content, title, dict(metadata)
+    raise MrScraperError("MrScraper returned no page content.")
 
 
 class MrScraperWebSearchProvider(WebSearchProvider):
@@ -76,6 +80,8 @@ class MrScraperWebSearchProvider(WebSearchProvider):
     def search(self, query: str, limit: int = 5) -> Dict[str, Any]:
         try:
             payload = MrScraperClient().web_search({"url": query, "raw": False})["data"]
+            if isinstance(payload, Mapping) and payload.get("success") is False:
+                raise MrScraperError("MrScraper reported a search failure.")
             items = _serp_items(payload)[: max(1, int(limit))]
             web = []
             for position, item in enumerate(items, start=1):

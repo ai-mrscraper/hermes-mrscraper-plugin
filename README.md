@@ -87,6 +87,7 @@ Call `mrscraper_account` with `{}` to inspect usage before a larger task. Its
 optional `timeout` defaults to 30 seconds. The response includes subscription
 status, usage, limit, remaining tokens, usage percentage, rate limits, renewal
 state, and basic account identity. It never returns the raw account record.
+Unavailable rate-limit values remain `null` rather than being reported as zero.
 
 ## Standard Hermes web tools
 
@@ -104,6 +105,8 @@ same page endpoint. Selecting the provider is optional for using the three
 focused tools. Derive structured fields and listings from the returned page
 content. For click/type/scroll workflows, use Hermes's interactive browser tools;
 page retrieval does not create a persistent browser session.
+The standard web tools report explicit upstream failures and missing page content
+as errors, including when the API returns HTTP 200.
 
 ## Migration from 1.x
 

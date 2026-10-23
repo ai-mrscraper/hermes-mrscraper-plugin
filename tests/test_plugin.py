@@ -55,17 +55,18 @@ def installed_plugin(tmp_path, monkeypatch):
     requests_seen = []
     http_timeouts = []
     responses = {
-        "/scraper": (200, {"data": {
+        "/scraper": (200, {
             "markdown": "# Local page", "html": "<h1>Local page</h1>",
             "title": "Local page", "metadata": {"fixture": True},
-        }}),
+            "data": {"markdown": "Unrelated nested content"}, "error": None,
+        }),
         "/search": (200, {"data": {"organic": [
             {"title": "First", "link": PAGE_URL, "snippet": "First result"},
             {"title": "Second", "link": "https://93.184.216.34/second"},
         ]}}),
         "/account": (200, {"data": {
             "stripeStatus": "active", "tokenLimit": "100", "tokenUsage": 25,
-            "rateLimit": 10, "rateTtl": 60, "isAutoRenew": True,
+            "rateLimit": None, "rateTtl": None, "isAutoRenew": True,
             "stripeCustomerId": "private-billing-id", "apiToken": "private-root-token",
             "user": {"name": "Fixture", "email": "fixture@example.com",
                      "isVerified": True, "latestApiToken": "private-nested-token"},
@@ -152,7 +153,7 @@ def test_external_tools_match_sdk_wire_and_preserve_standard_web_provider(instal
     scraped = _call(plugin, "mrscraper_scraper_api", {"url": PAGE_URL})
     default_request = plugin.requests[-1]
     assert scraped["status_code"] == 200
-    assert scraped["data"]["data"]["title"] == "Local page"
+    assert scraped["data"]["title"] == "Local page"
     assert default_request["method"] == "POST"
     assert default_request["body"] == {"url": PAGE_URL, "maxRetries": 3}
     assert default_request["query"]["token"] == [SCOPED_TOKEN]
@@ -194,6 +195,7 @@ def test_external_tools_match_sdk_wire_and_preserve_standard_web_provider(instal
     summary = account["data"]
     assert summary["token_remaining"] == summary["token_limit"] - summary["token_usage"]
     assert summary["usage_percent"] == summary["token_usage"] / summary["token_limit"] * 100
+    assert summary["rate_limit"] is None and summary["rate_ttl"] is None
     assert summary["user"] == {"name": "Fixture", "email": "fixture@example.com", "verified": True}
     assert "private" not in json.dumps(account)
     for response in (scraped, searched, account):
@@ -216,6 +218,12 @@ def test_external_tools_match_sdk_wire_and_preserve_standard_web_provider(instal
     assert extracted[0]["url"] == PAGE_URL and extracted[0]["title"] == "Local page"
     assert extracted[0]["content"] == extracted[0]["raw_content"] == "# Local page"
     assert plugin.requests[-1]["query"]["markdown"] == ["true"]
+
+    plugin.responses["/scraper"] = (200, {"data": {
+        "markdown": "# Nested page", "title": "Nested page",
+    }})
+    nested = provider.extract([PAGE_URL])[0]
+    assert nested["content"] == "# Nested page" and nested["title"] == "Nested page"
 
 
 def test_validation_scope_and_error_redaction_precede_transport(installed_plugin):
@@ -268,3 +276,13 @@ def test_validation_scope_and_error_redaction_precede_transport(installed_plugin
         for secret in (SCOPED_TOKEN, quote(SCOPED_TOKEN, safe=""), "another-profile-token"):
             assert secret not in json.dumps(result)
     assert [request["path"] for request in plugin.requests] == ["/scraper", "/search", "/account"]
+
+    plugin.responses["/search"] = (200, {"success": False, "message": leaked_error})
+    failed_search = provider.search("hermes agent")
+    assert failed_search["success"] is False and failed_search.get("error")
+    assert SCOPED_TOKEN not in json.dumps(failed_search)
+    for payload in ({"error": leaked_error}, {"html": "", "markdown": "", "error": None}):
+        plugin.responses["/scraper"] = (200, payload)
+        failed_extract = provider.extract([PAGE_URL])[0]
+        assert failed_extract.get("error") and "content" not in failed_extract
+        assert SCOPED_TOKEN not in json.dumps(failed_extract)

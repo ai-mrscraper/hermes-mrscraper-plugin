@@ -161,8 +161,8 @@ class MrScraperClient:
             "token_limit": limit,
             "token_remaining": max(0, limit - usage),
             "usage_percent": round(usage / limit * 100, 2) if limit > 0 else 0,
-            "rate_limit": _number(details.get("rateLimit")),
-            "rate_ttl": _number(details.get("rateTtl")),
+            "rate_limit": None if details.get("rateLimit") is None else _number(details["rateLimit"]),
+            "rate_ttl": None if details.get("rateTtl") is None else _number(details["rateTtl"]),
             "auto_renew": bool(details.get("isAutoRenew")),
             "ends_at": _string(details.get("endsAt")),
             "user": {
