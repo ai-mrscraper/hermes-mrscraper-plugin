@@ -67,12 +67,22 @@ _SEARCH_PROPERTIES = {
 MRSCRAPER_TOOLS = [
     (
         "mrscraper_scraper_api",
-        _schema("mrscraper_scraper_api", "Retrieve a page as HTML, Markdown, or a screenshot with MrScraper.", _SCRAPER_PROPERTIES, ["url"]),
+        _schema(
+            "mrscraper_scraper_api",
+            "Fetch a public web page as rendered HTML, Markdown, screenshot, or a combination.",
+            _SCRAPER_PROPERTIES,
+            ["url"],
+        ),
         _handler("scraper_api"),
     ),
     (
         "mrscraper_web_search",
-        _schema("mrscraper_web_search", "Search Google through MrScraper; returns parsed JSON by default.", _SEARCH_PROPERTIES, ["url"]),
+        _schema(
+            "mrscraper_web_search",
+            "Search the web to retrieve real-time search results, including relevant website URLs, titles, descriptions, and related questions based on a given query.",
+            _SEARCH_PROPERTIES,
+            ["url"],
+        ),
         _handler("web_search"),
     ),
     (

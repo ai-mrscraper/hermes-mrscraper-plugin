@@ -65,8 +65,8 @@ does not establish that the expected page was retrieved.
 
 | Tool | Purpose | Direct HTTP endpoint |
 | --- | --- | --- |
-| `mrscraper_scraper_api` | Retrieve HTML, Markdown, or a screenshot from a known page. | `POST https://api.mrscraper.com/` |
-| `mrscraper_web_search` | Search Google using query text or a Google search URL. | `POST https://sync.scraper.mrscraper.com/api/google/serp/v2/sync` |
+| `mrscraper_scraper_api` | Fetch a public web page as rendered HTML, Markdown, screenshot, or a combination. | `POST https://api.mrscraper.com/` |
+| `mrscraper_web_search` | Search the web to retrieve real-time search results, including relevant website URLs, titles, descriptions, and related questions based on a given query. | `POST https://sync.scraper.mrscraper.com/api/google/serp/v2/sync` |
 | `mrscraper_account` | Read subscription status, token usage, quota, and rate limits. | `GET https://api.app.mrscraper.com/api/v1/subscription-accounts` |
 
 These operations follow the
