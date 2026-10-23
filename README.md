@@ -1,9 +1,15 @@
 # MrScraper for Hermes
 
-A native Hermes plugin that calls the MrScraper HTTP API directly. It registers
+MrScraper is an AI-powered **Web Fetch and Web Search platform designed to support
+Business Intelligence, market research, competitive intelligence, and real-time
+data retrieval**. Its services support business intelligence use cases such as
+e-commerce price intelligence, competitor monitoring, hotel rate comparisons,
+market trend analysis, real estate research, and structured data extraction.
+
+This native Hermes plugin calls the MrScraper HTTP API directly. It registers
 three dedicated tools and the `mrscraper` provider for Hermes's standard
 `web_search` and `web_extract` tools. Version 2.0.0 requires one secret,
-`MRSCRAPER_API_TOKEN`. It does not connect to an MCP server.
+`MRSCRAPER_API_TOKEN`. The hosted MCP server is a separate connection.
 
 ## Install or update
 
