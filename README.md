@@ -6,10 +6,10 @@ data retrieval**. Its services support business intelligence use cases such as
 e-commerce price intelligence, competitor monitoring, hotel rate comparisons,
 market trend analysis, real estate research, and structured data extraction.
 
-This native Hermes plugin calls the MrScraper HTTP API directly. It registers
-three dedicated tools and the `mrscraper` provider for Hermes's standard
-`web_search` and `web_extract` tools. Version 2.0.0 requires one secret,
-`MRSCRAPER_API_TOKEN`. The hosted MCP server is a separate connection.
+This native Hermes plugin calls the MrScraper HTTP API directly and provides
+three dedicated tools: `mrscraper_scraper_api`, `mrscraper_web_search`, and
+`mrscraper_account`. Version 2.0.0 requires one secret, `MRSCRAPER_API_TOKEN`.
+The hosted MCP server is a separate connection.
 
 ## Install or update
 
@@ -139,7 +139,12 @@ status, usage, limit, remaining tokens, usage percentage, rate limits, renewal
 state, and basic account identity. It never returns the raw account record.
 Unavailable rate-limit values remain `null` rather than being reported as zero.
 
-## Standard Hermes web tools
+## Optional integration with Hermes's built-in web tools
+
+Hermes provides built-in `web_search` and `web_extract` tools. This plugin can
+optionally supply MrScraper as their backend through its `mrscraper` provider.
+The three dedicated `mrscraper_*` tools above work without this provider
+selection.
 
 Select MrScraper under **Web Search & Extract** in `hermes tools`, or configure
 the active profile's `config.yaml`:
@@ -150,10 +155,10 @@ web:
   extract_backend: mrscraper
 ```
 
-`web_search` maps to the same Google search endpoint and `web_extract` maps to the
-same page endpoint. Selecting the provider is optional for using the three
-focused tools. Derive structured fields and listings from the returned page
-content. For click/type/scroll workflows, use Hermes's interactive browser tools;
+With this provider selected, Hermes's `web_search` maps to the Google search
+endpoint and `web_extract` maps to the page endpoint. Derive structured fields
+and listings from the returned page content. For click/type/scroll workflows,
+use Hermes's interactive browser tools;
 page retrieval does not create a persistent browser session.
 The standard web tools report explicit upstream failures and missing page content
 as errors, including when the API returns HTTP 200.
