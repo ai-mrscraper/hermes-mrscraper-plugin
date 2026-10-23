@@ -2,9 +2,12 @@
 
 A native Hermes plugin that calls the MrScraper HTTP API directly. It registers
 three dedicated tools and the `mrscraper` provider for Hermes's standard
-`web_search` and `web_extract` tools. It does not connect to an MCP server.
+`web_search` and `web_extract` tools. Version 2.0.0 requires one secret,
+`MRSCRAPER_API_TOKEN`. It does not connect to an MCP server.
 
 ## Install or update
+
+Install the reviewed catalog version:
 
 ```bash
 hermes plugins install mrscraper
@@ -16,10 +19,35 @@ The installer prompts for `MRSCRAPER_API_TOKEN` from the
 token through the active profile's secret scope. Start a new Hermes session after
 enabling or updating the plugin to load its tool definitions.
 
-For an existing catalog installation, use `hermes plugins update mrscraper` after
-the catalog's reviewed pin has moved to version 2.0.0. The catalog installs an
-exact reviewed commit; changing this repository alone does not update the live
-catalog or existing installations.
+For an existing catalog installation, use `hermes plugins update mrscraper`.
+The [Hermes catalog listing](https://hermes-agent.nousresearch.com/docs/plugins/mrscraper)
+shows the version and exact reviewed commit it installs. The catalog can lag
+behind this repository's `main` branch: the three tools described below require
+version 2.0.0. Changing `main` does not change the reviewed catalog pin or existing
+installations. The [catalog update PR](https://github.com/NousResearch/hermes-agent/pull/143345)
+tracks adoption of version 2.0.0.
+
+To install the current repository version directly on a profile without an
+existing MrScraper installation, use the repository source instead:
+
+```bash
+hermes plugins install ai-mrscraper/hermes-mrscraper-plugin
+hermes plugins enable mrscraper
+```
+
+This is a custom-source installation rather than the reviewed catalog release.
+For a specific revision, add `--ref <full-40-character-commit-SHA>` to the install
+command. Replacing an existing installation also requires `--force`. Start a new
+Hermes session after either installation path.
+
+### Check the connection
+
+Run `hermes plugins list` to confirm MrScraper is installed and enabled. In a new
+Hermes session, ask the agent to call `mrscraper_account` with `{}` first. Then
+test `mrscraper_scraper_api` with `{"url":"https://example.com","markdown":true}`
+and `mrscraper_web_search` with `{"url":"Hermes Agent NousResearch"}`. Page and
+search calls may consume account tokens. Check the response status and returned
+content or search results before using them.
 
 ## Three tools
 
@@ -35,6 +63,10 @@ These operations follow the
 `status_code`, `data`, and filtered HTTP `headers`. Account data is an allowlisted
 summary; API tokens, billing identifiers, and credential-bearing response headers
 are excluded.
+
+See the [MrScraper API documentation](https://docs.mrscraper.com/docs/getting-started/scraper-api)
+for service request options. The native tool schemas define the supported inputs
+and defaults for this plugin; credentials are never tool arguments.
 
 ### Page retrieval
 
@@ -137,10 +169,11 @@ response bodies that could reveal credentials.
 
 ## Development
 
-Use `hermes plugins validate .` for manifest/capability admission and the security
+Use `hermes plugins validate . --install-deps` for manifest/capability admission and the security
 scan. Current Hermes admission reports a compatibility warning for the internal
 URL-safety and website-policy helpers also used by version 1.x; the plugin retains
-those checks and tests them against the target Hermes checkout. Run this repository's tests through a Hermes checkout's canonical runner:
+those checks and tests them against the target Hermes checkout. Run this
+repository's tests through a Hermes checkout's canonical runner:
 
 ```bash
 /path/to/hermes-agent/scripts/run_tests.sh /path/to/hermes-mrscraper-plugin/tests/test_plugin.py -q --import-mode=importlib
