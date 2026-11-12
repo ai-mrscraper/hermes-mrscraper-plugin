@@ -197,12 +197,10 @@ as errors, including when the API returns HTTP 200.
 
 ## Migration from 1.x
 
-Version 2.0.0 replaces all 15 previous dedicated tools with the three names above.
-Use `mrscraper_scraper_api` in place of `mrscraper_fetch_rendered_html`,
-`mrscraper_web_search` in place of `mrscraper_search_google_serp`, and
-`mrscraper_account` in place of `mrscraper_get_account_info`. Update saved prompts
-and automations, then start a new session. The `mrscraper` provider name and
-`MRSCRAPER_API_TOKEN` remain the same.
+Version 2.0.0 replaced the 15 legacy dedicated tools with `mrscraper_scraper_api`,
+`mrscraper_web_search`, and `mrscraper_account`. Update saved prompts and
+automations to use these three tools, then start a new session. The `mrscraper`
+provider name and `MRSCRAPER_API_TOKEN` remain the same.
 
 Managed crawler, extraction-job, scraper-run, and saved-result tools are no longer
 registered. This plugin's surface follows the three REST operations; manage other
