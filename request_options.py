@@ -1,4 +1,4 @@
-"""Validate tool arguments and serialize the Python SDK's HTTP contract."""
+"""Validate tool arguments and serialize MrScraper's REST request contract."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def _required_text(args: dict[str, Any], name: str) -> str:
     return value.strip()
 
 
-def build_scraper_request(args: dict[str, Any]) -> tuple[dict, dict, int]:
+def build_scraper_request(args: dict[str, Any]) -> tuple[dict, int]:
     url = _required_text(args, "url")
     if not is_safe_url(url):
         _error("url must be a safe HTTP or HTTPS URL.")
@@ -69,6 +69,9 @@ def build_scraper_request(args: dict[str, Any]) -> tuple[dict, dict, int]:
             _error("headers must contain string values.")
         headers = json.dumps(headers)
     query = {
+        "url": url,
+        "maxRetries": _integer(args, "max_retries", 3, 0),
+        "tokenCap": _integer(args, "token_cap", None, 0),
         "timeout": timeout,
         "geoCode": args.get("geo_code", "US"),
         "proxyCountry": args.get("proxy_country"),
@@ -91,38 +94,32 @@ def build_scraper_request(args: dict[str, Any]) -> tuple[dict, dict, int]:
         key: str(value).lower() if isinstance(value, bool) else str(value)
         for key, value in query.items() if value is not None
     }
-    body = {"url": url, "maxRetries": _integer(args, "max_retries", 3, 0)}
-    token_cap = _integer(args, "token_cap", None, 0)
-    if token_cap is not None:
-        body["tokenCap"] = token_cap
-    return params, body, timeout
+    return params, timeout
 
 
 def build_search_request(args: dict[str, Any]) -> tuple[dict, float]:
+    removed = {"raw", "format", "language", "page", "render_js"}.intersection(args)
+    if removed:
+        _error(f"Unsupported Web Search options: {', '.join(sorted(removed))}. Use region and num_results.")
     query = _required_text(args, "url")
-    region, language, page = None, None, None
+    region = None
     parsed = urlparse(query)
     if parsed.scheme.lower() in {"http", "https"}:
         values = parse_qs(parsed.query)
         query = values.get("q", [""])[0].strip()
         if not query:
-            _error("Google search URL must contain a q parameter.")
+            _error("Search URL must contain a q parameter.")
         region = values.get("gl", [None])[0]
-        language = values.get("hl", [None])[0]
-        try:
-            start = int(values.get("start", [0])[0])
-        except ValueError:
-            start = 0
-        page = start // 10 + 1 if start > 0 else None
-    representation = args.get("format", "json")
-    if representation not in {"json", "html"}:
-        _error("format must be json or html.")
+    country = args.get("region") or region or "us"
+    if not isinstance(country, str) or len(country) != 2 or not country.isascii() or not country.isalpha():
+        _error("region must be a two-letter country code.")
+    num_results = _integer(args, "num_results", 10, 10)
+    if num_results > 100:
+        _error("num_results must be between 10 and 100.")
     body = {
+        "action": "websearch",
         "query": query,
-        "region": args.get("region") or region,
-        "language": args.get("language") or language,
-        "page": _integer(args, "page", None, 1) or page,
-        "format": "html" if _boolean(args, "raw", False) else representation,
-        "renderJs": _boolean(args, "render_js", False),
+        "country": country.lower(),
+        "numResults": num_results,
     }
-    return {key: value for key, value in body.items() if value is not None}, positive_timeout(args.get("timeout", 600))
+    return body, positive_timeout(args.get("timeout", 600))

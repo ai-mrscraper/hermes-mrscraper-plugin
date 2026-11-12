@@ -1,4 +1,4 @@
-"""Standalone discovery, SDK wire compatibility, and profile security contracts."""
+"""Standalone discovery, REST wire compatibility, and profile security contracts."""
 
 from __future__ import annotations
 
@@ -60,10 +60,11 @@ def installed_plugin(tmp_path, monkeypatch):
             "title": "Local page", "metadata": {"fixture": True},
             "data": {"markdown": "Unrelated nested content"}, "error": None,
         }),
-        "/search": (200, {"data": {"organic": [
-            {"title": "First", "link": PAGE_URL, "snippet": "First result"},
-            {"title": "Second", "link": "https://93.184.216.34/second"},
-        ]}}),
+        "/search": (200, {"success": True, "message": "Search completed", "data": [
+            {"rank": 7, "title": "First", "url": PAGE_URL,
+             "description": "First result", "source": "example.com"},
+            {"rank": 8, "title": "Second", "url": "https://93.184.216.34/second"},
+        ], "tokenUsage": 1}),
         "/account": (200, {"data": {
             "stripeStatus": "active", "tokenLimit": "100", "tokenUsage": 25,
             "rateLimit": None, "rateTtl": None, "isAutoRenew": True,
@@ -143,7 +144,7 @@ def _call(plugin, name, arguments):
     return json.loads(registry.dispatch(name, arguments, scope=plugin.manager.scope_key))
 
 
-def test_external_tools_match_sdk_wire_and_preserve_standard_web_provider(installed_plugin):
+def test_external_tools_match_rest_wire_and_preserve_standard_web_provider(installed_plugin):
     plugin = installed_plugin
     assert set(plugin.loaded.tools_registered) == set(plugin.loaded.manifest.provides_tools) == TOOL_NAMES
     schemas = {name: schema for name, schema, _handler in plugin.module.mrscraper_tools.MRSCRAPER_TOOLS}
@@ -154,22 +155,29 @@ def test_external_tools_match_sdk_wire_and_preserve_standard_web_provider(instal
     default_request = plugin.requests[-1]
     assert scraped["status_code"] == 200
     assert scraped["data"]["title"] == "Local page"
-    assert default_request["method"] == "POST"
-    assert default_request["body"] == {"url": PAGE_URL, "maxRetries": 3}
+    assert default_request["method"] == "GET"
+    assert default_request["body"] is None
+    assert default_request["query"]["url"] == [PAGE_URL]
+    assert default_request["query"]["maxRetries"] == ["3"]
+    assert "tokenCap" not in default_request["query"]
     assert default_request["query"]["token"] == [SCOPED_TOKEN]
     assert default_request["query"]["timeout"] == ["120"]
     assert "browserRendering" not in default_request["query"]
     assert "super" not in default_request["query"]
     assert plugin.timeouts[-1] == 120 + 30
 
+    target_url = PAGE_URL + "?q=a%2Bb&tag=café#section"
     _call(plugin, "mrscraper_scraper_api", {
-        "url": PAGE_URL, "browser_rendering": False, "screenshot": True,
+        "url": target_url, "browser_rendering": False, "screenshot": True,
         "home_page": True, "html": False, "markdown": True,
         "timeout": 300, "max_retries": 0, "token_cap": 0,
         "headers": {"X-Target": "value"},
     })
     explicit_request = plugin.requests[-1]
-    assert explicit_request["body"] == {"url": PAGE_URL, "maxRetries": 0, "tokenCap": 0}
+    assert explicit_request["method"] == "GET" and explicit_request["body"] is None
+    assert explicit_request["query"]["url"] == [target_url]
+    assert explicit_request["query"]["maxRetries"] == ["0"]
+    assert explicit_request["query"]["tokenCap"] == ["0"]
     for key in ("browserRendering", "screenshot", "warmStart", "markdown"):
         assert explicit_request["query"][key] == ["true"]
     assert explicit_request["query"]["html"] == ["false"]
@@ -178,15 +186,16 @@ def test_external_tools_match_sdk_wire_and_preserve_standard_web_provider(instal
 
     searched = _call(plugin, "mrscraper_web_search", {
         "url": "https://www.google.com/search?q=hermes+agent&gl=id&hl=id&start=20",
-        "region": "sg",
+        "region": "SG", "num_results": 100,
     })
     search_request = plugin.requests[-1]
     assert search_request["path"] == "/search"
+    assert search_request["method"] == "POST" and not search_request["query"]
     assert search_request["body"] == {
-        "query": "hermes agent", "region": "sg", "language": "id", "page": 3,
-        "format": "json", "renderJs": False,
+        "action": "websearch", "query": "hermes agent", "country": "sg", "numResults": 100,
     }
-    assert searched["data"]["data"]["organic"][0]["title"] == "First"
+    assert plugin.timeouts[-1] == 600
+    assert searched["data"]["data"][0]["title"] == "First"
 
     account = _call(plugin, "mrscraper_account", {})
     account_request = plugin.requests[-1]
@@ -211,9 +220,16 @@ def test_external_tools_match_sdk_wire_and_preserve_standard_web_provider(instal
     assert provider.is_available() and provider.supports_search() and provider.supports_extract()
     assert provider.search("hermes agent", limit=1) == {
         "success": True, "data": {"web": [{
-            "title": "First", "url": PAGE_URL, "description": "First result", "position": 1,
+            "title": "First", "url": PAGE_URL, "description": "First result", "position": 7,
         }]},
     }
+    assert plugin.requests[-1]["body"] == {
+        "action": "websearch", "query": "hermes agent", "country": "us", "numResults": 10,
+    }
+    provider.search("more results", limit=25)
+    assert plugin.requests[-1]["body"]["numResults"] == 25
+    provider.search("maximum results", limit=101)
+    assert plugin.requests[-1]["body"]["numResults"] == 100
     extracted = provider.extract([PAGE_URL])
     assert extracted[0]["url"] == PAGE_URL and extracted[0]["title"] == "Local page"
     assert extracted[0]["content"] == extracted[0]["raw_content"] == "# Local page"
@@ -224,6 +240,30 @@ def test_external_tools_match_sdk_wire_and_preserve_standard_web_provider(instal
     }})
     nested = provider.extract([PAGE_URL])[0]
     assert nested["content"] == "# Nested page" and nested["title"] == "Nested page"
+
+
+def test_search_url_localization_and_explicit_overrides(installed_plugin):
+    plugin = installed_plugin
+    _call(plugin, "mrscraper_web_search", {
+        "url": "https://www.google.com/search?q=caf%C3%A9+%26+tea&gl=ID",
+        "timeout": 12.5,
+    })
+    assert plugin.requests[-1]["body"] == {
+        "action": "websearch", "query": "café & tea", "country": "id", "numResults": 10,
+    }
+    assert plugin.timeouts[-1] == 12.5
+
+
+@pytest.mark.parametrize("options", [
+    {"num_results": 9}, {"num_results": 101}, {"num_results": True},
+    {"num_results": 10.5}, {"region": "indonesia"}, {"region": "12"},
+    {"raw": True}, {"format": "html"}, {"language": "id"},
+    {"page": 2}, {"render_js": True},
+])
+def test_invalid_or_removed_search_options_never_reach_transport(installed_plugin, options):
+    result = _call(installed_plugin, "mrscraper_web_search", {"url": "hermes agent", **options})
+    assert result.get("error")
+    assert not installed_plugin.requests
 
 
 def test_validation_scope_and_error_redaction_precede_transport(installed_plugin):

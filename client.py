@@ -1,4 +1,4 @@
-"""Direct HTTP adapter for the three MrScraper Python SDK operations."""
+"""Direct HTTP adapter for MrScraper page, search, and account operations."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from agent.secret_scope import get_secret
 from .request_options import build_scraper_request, build_search_request, positive_timeout
 
 SCRAPER_API_URL = "https://api.mrscraper.com/"
-WEB_SEARCH_API_URL = "https://sync.scraper.mrscraper.com/api/google/serp/v2/sync"
+WEB_SEARCH_API_URL = "https://api.mrscraper.com/"
 ACCOUNT_API_URL = "https://api.app.mrscraper.com/api/v1/subscription-accounts"
 _SENSITIVE_HEADERS = {
     "authorization", "proxy-authorization", "set-cookie", "set-cookie2", "x-api-token",
@@ -69,7 +69,7 @@ def _string(value: Any) -> str | None:
 
 
 class MrScraperClient:
-    """Synchronous adapter using the SDK's endpoints and wire representations."""
+    """Synchronous adapter for MrScraper's REST API."""
 
     def __init__(self, token: str | None = None) -> None:
         self.token = get_mrscraper_token() if token is None else token.strip()
@@ -130,10 +130,10 @@ class MrScraperClient:
         }
 
     def scraper_api(self, args: dict[str, Any]) -> dict[str, Any]:
-        params, body, timeout = build_scraper_request(args)
+        params, timeout = build_scraper_request(args)
         return self._request(
-            "POST", SCRAPER_API_URL,
-            params={"token": self.token, **params}, body=body, timeout=timeout + 30,
+            "GET", SCRAPER_API_URL,
+            params={"token": self.token, **params}, timeout=timeout + 30,
         )
 
     def web_search(self, args: dict[str, Any]) -> dict[str, Any]:

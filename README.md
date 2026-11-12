@@ -8,7 +8,7 @@ market trend analysis, real estate research, and structured data extraction.
 
 This native Hermes plugin calls the MrScraper HTTP API directly and provides
 three dedicated tools: `mrscraper_scraper_api`, `mrscraper_web_search`, and
-`mrscraper_account`. Version 2.0.0 requires one secret, `MRSCRAPER_API_TOKEN`.
+`mrscraper_account`. Version 3.0.0 requires one secret, `MRSCRAPER_API_TOKEN`.
 The hosted MCP server is a separate connection.
 
 ## Install or update
@@ -28,10 +28,9 @@ enabling or updating the plugin to load its tool definitions.
 For an existing catalog installation, use `hermes plugins update mrscraper`.
 The [Hermes catalog listing](https://hermes-agent.nousresearch.com/docs/plugins/mrscraper)
 shows the version and exact reviewed commit it installs. The catalog can lag
-behind this repository's `main` branch: the three tools described below require
-version 2.0.0. Changing `main` does not change the reviewed catalog pin or existing
-installations. The [catalog update PR](https://github.com/NousResearch/hermes-agent/pull/143345)
-tracks adoption of version 2.0.0.
+behind this repository's `main` branch: the GET fetch and unified Web Search
+contract described below require version 3.0.0. Changing `main` does not change
+the reviewed catalog pin or existing installations.
 
 To install the current repository version directly on a profile without an
 existing MrScraper installation, use the repository source instead:
@@ -71,13 +70,11 @@ does not establish that the expected page was retrieved.
 
 | Tool | Purpose | Direct HTTP endpoint |
 | --- | --- | --- |
-| `mrscraper_scraper_api` | Fetch a public web page as rendered HTML, Markdown, screenshot, or a combination. | `POST https://api.mrscraper.com/` |
-| `mrscraper_web_search` | Search the web to retrieve real-time search results, including relevant website URLs, titles, descriptions, and related questions based on a given query. | `POST https://sync.scraper.mrscraper.com/api/google/serp/v2/sync` |
+| `mrscraper_scraper_api` | Fetch a public web page as rendered HTML, Markdown, screenshot, or a combination. | `GET https://api.mrscraper.com/` |
+| `mrscraper_web_search` | Search the web to retrieve real-time results, including relevant website URLs, titles, and descriptions based on a given query. | `POST https://api.mrscraper.com/` with `action="websearch"` |
 | `mrscraper_account` | Read subscription status, token usage, quota, and rate limits. | `GET https://api.app.mrscraper.com/api/v1/subscription-accounts` |
 
-These operations follow the
-[Python SDK](https://github.com/mrscraper-com/sdk-python)'s `scraper_api`,
-`web_search`, and `account` methods. Successful native tool responses include
+These operations use MrScraper's direct REST endpoints. Successful native tool responses include
 `status_code`, `data`, and filtered HTTP `headers`. Account data is an allowlisted
 summary; API tokens, billing identifiers, and credential-bearing response headers
 are excluded.
@@ -112,24 +109,59 @@ locally. `stream` requests a server stream but the plugin buffers the complete
 response. URL safety and the active Hermes website policy are checked before
 submitting a page request.
 
-### Google search
+Every fetch option is encoded in the query string, including `url`, `maxRetries`,
+and optional `tokenCap`; GET requests have no body. With `MRSCRAPER_API_TOKEN`
+already configured in your shell, an equivalent Markdown fetch is:
+
+```bash
+curl --request GET 'https://api.mrscraper.com/' \
+  --url-query "token=${MRSCRAPER_API_TOKEN}" \
+  --url-query 'url=https://example.com/article' \
+  --url-query 'timeout=120' \
+  --url-query 'geoCode=US' \
+  --url-query 'html=false' \
+  --url-query 'markdown=true' \
+  --url-query 'maxRetries=3' \
+  --header "Authorization: Bearer ${MRSCRAPER_API_TOKEN}" \
+  --header "x-api-token: ${MRSCRAPER_API_TOKEN}" \
+  --header 'Content-Type: application/json' \
+  --header 'Accept: application/json' \
+  --max-time 150
+```
+
+`--url-query` requires curl 7.87.0 or newer.
+
+### Web Search
 
 ```json
 {
   "url": "Hermes Agent documentation",
   "region": "id",
-  "language": "en",
-  "page": 1
+  "num_results": 10
 }
 ```
 
-`url` accepts query text or a Google URL containing `q`. A URL's `gl`, `hl`, and
-`start` parameters provide region, language, and page unless explicitly
-overridden. The native tool defaults to `raw=false` and `format="json"`, so the
-agent receives parsed results. This intentionally differs from the Python SDK's
-legacy `raw=true` default. Set `raw=true` or `format="html"` for result-page HTML;
-`raw` takes precedence. `render_js` defaults to `false`; the request timeout
-defaults to 600 seconds.
+`url` accepts query text or a search URL containing `q`. An explicit `region`
+overrides the URL's `gl` parameter; otherwise the country defaults to `us`.
+`num_results` accepts integers from 10 to 100 and defaults to 10. The local
+request timeout defaults to 600 seconds and is not sent to the API.
+
+The REST JSON body maps `url` to `query`, `region` to `country`, and
+`num_results` to `numResults`, with `action="websearch"`:
+
+```bash
+curl --request POST 'https://api.mrscraper.com/' \
+  --header "Authorization: Bearer ${MRSCRAPER_API_TOKEN}" \
+  --header "x-api-token: ${MRSCRAPER_API_TOKEN}" \
+  --header 'Content-Type: application/json' \
+  --header 'Accept: application/json' \
+  --max-time 600 \
+  --data '{"action":"websearch","query":"Hermes Agent documentation","country":"id","numResults":10}'
+```
+
+The REST response contains `success`, `message`, `data[]`, and `tokenUsage`.
+Each result supplies `rank`, `title`, `url`, `description`, and `source`.
+Native tool callers read that array at `data.data[]` inside the response envelope.
 
 ### Account usage
 
@@ -155,7 +187,7 @@ web:
   extract_backend: mrscraper
 ```
 
-With this provider selected, Hermes's `web_search` maps to the Google search
+With this provider selected, Hermes's `web_search` maps to the unified Web Search
 endpoint and `web_extract` maps to the page endpoint. Derive structured fields
 and listings from the returned page content. For click/type/scroll workflows,
 use Hermes's interactive browser tools;
@@ -173,8 +205,19 @@ and automations, then start a new session. The `mrscraper` provider name and
 `MRSCRAPER_API_TOKEN` remain the same.
 
 Managed crawler, extraction-job, scraper-run, and saved-result tools are no longer
-registered. This plugin's surface follows the three SDK endpoints; manage other
+registered. This plugin's surface follows the three REST operations; manage other
 MrScraper workflows in the dashboard.
+
+## Migration from 2.x
+
+Version 3.0.0 switches page retrieval to GET and Web Search to the unified API.
+For `mrscraper_web_search`, replace `raw`, `format`, `language`, `page`, and
+`render_js` with the supported `url`, `region`, `num_results`, and `timeout`
+inputs. The removed options are rejected; search URL `hl` and `start` values
+are not forwarded. Results now come from the REST `data[]` array with `url`
+and `rank`. Restart the Hermes session after updating to refresh tool schemas.
+The standard web provider requests at least 10 and at most 100 results from the
+API, trims to Hermes's requested limit, and preserves the returned rank.
 
 The [hosted MCP server](https://docs.mrscraper.com/docs/getting-started/mcp-server)
 is a separate connection using OAuth and server-provided `scraperAPI`,

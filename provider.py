@@ -79,10 +79,13 @@ class MrScraperWebSearchProvider(WebSearchProvider):
 
     def search(self, query: str, limit: int = 5) -> Dict[str, Any]:
         try:
-            payload = MrScraperClient().web_search({"url": query, "raw": False})["data"]
+            limit = max(1, int(limit))
+            payload = MrScraperClient().web_search({
+                "url": query, "num_results": min(100, max(10, limit)),
+            })["data"]
             if isinstance(payload, Mapping) and payload.get("success") is False:
                 raise MrScraperError("MrScraper reported a search failure.")
-            items = _serp_items(payload)[: max(1, int(limit))]
+            items = _serp_items(payload)[:limit]
             web = []
             for position, item in enumerate(items, start=1):
                 web.append({
@@ -91,7 +94,7 @@ class MrScraperWebSearchProvider(WebSearchProvider):
                     "description": str(
                         item.get("description") or item.get("snippet") or ""
                     ),
-                    "position": int(item.get("position") or position),
+                    "position": int(item.get("rank") or item.get("position") or position),
                 })
             return {"success": True, "data": {"web": web}}
         except MrScraperError as exc:
@@ -127,7 +130,7 @@ class MrScraperWebSearchProvider(WebSearchProvider):
         return {
             "name": "MrScraper",
             "badge": "paid",
-            "tag": "Google search and page retrieval",
+            "tag": "Web search and page retrieval",
             "env_vars": [
                 {
                     "key": "MRSCRAPER_API_TOKEN",

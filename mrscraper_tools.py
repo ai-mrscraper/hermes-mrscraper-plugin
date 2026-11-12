@@ -55,13 +55,9 @@ _SCRAPER_PROPERTIES = {
     "stream": {"type": "boolean", "description": "Request server streaming; the complete response is buffered."},
 }
 _SEARCH_PROPERTIES = {
-    "url": {"type": "string", "description": "Google query text or Google search URL containing q."},
-    "raw": {"type": "boolean", "default": False, "description": "Request raw HTML; overrides format."},
-    "region": {"type": "string"},
-    "language": {"type": "string"},
-    "page": {"type": "integer", "minimum": 1},
-    "format": {"type": "string", "enum": ["json", "html"], "default": "json"},
-    "render_js": {"type": "boolean", "default": False},
+    "url": {"type": "string", "description": "Search query text or a search URL containing q."},
+    "region": {"type": "string", "description": "Two-letter country code; defaults to us or the search URL's gl value."},
+    "num_results": {"type": "integer", "minimum": 10, "maximum": 100, "default": 10},
     "timeout": {"type": "number", "exclusiveMinimum": 0, "default": 600},
 }
 MRSCRAPER_TOOLS = [
@@ -79,7 +75,7 @@ MRSCRAPER_TOOLS = [
         "mrscraper_web_search",
         _schema(
             "mrscraper_web_search",
-            "Search the web to retrieve real-time search results, including relevant website URLs, titles, descriptions, and related questions based on a given query.",
+            "Search the web to retrieve real-time results, including relevant website URLs, titles, and descriptions based on a given query.",
             _SEARCH_PROPERTIES,
             ["url"],
         ),
