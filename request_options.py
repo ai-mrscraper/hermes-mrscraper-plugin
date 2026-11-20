@@ -1,14 +1,35 @@
-"""Validate tool arguments and serialize MrScraper's REST request contract."""
+"""Validate tool arguments and serialize the seven MrScraper service requests."""
 
 from __future__ import annotations
 
-import json
-import math
 from typing import Any, NoReturn
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlencode
 
 from tools.url_safety import is_safe_url
 from tools.website_policy import check_website_access
+
+DEFAULT_JSON_PROMPT = "Extract all data as complete as possible."
+WAIT_UNTIL_EVENTS = ("domcontentloaded", "load", "networkidle0", "networkidle2")
+SCREENSHOT_AREAS = ("full", "top")
+MAX_GET_URL_LENGTH = 8000
+TRANSPORT_GRACE_SECONDS = 30
+BRAND_AND_SEARCH_TIMEOUT = 120
+STATUS_TIMEOUT = 600
+
+_PAGE = (
+    "url", "timeout", "geo_code", "proxy_country", "super", "wait_until",
+    "proxy", "max_retries", "save_result",
+)
+_LOADING = ("block_resources", "wait_for_selector", "return_cookie")
+SERVICE_OPTIONS: dict[str, tuple[str, ...]] = {
+    "status": (),
+    "scrape_html": _PAGE + _LOADING + ("browser_rendering", "warm_start"),
+    "scrape_markdown": _PAGE + _LOADING + ("browser_rendering", "warm_start", "html"),
+    "get_screenshot": _PAGE + _LOADING + ("warm_start", "screenshot", "html", "markdown"),
+    "scrape_brand": ("url",),
+    "scrape_json": _PAGE + ("prompt", "browser_rendering", "html", "screenshot"),
+    "web_search": ("query", "country", "num_results"),
+}
 
 
 def _error(message: str) -> NoReturn:
@@ -16,110 +37,182 @@ def _error(message: str) -> NoReturn:
     raise MrScraperError(message)
 
 
-def _boolean(args: dict[str, Any], name: str, default: bool | None) -> bool | None:
-    value = args.get(name, default)
-    if value is None and default is None:
-        return None
+def check_options(service: str, args: dict[str, Any]) -> None:
+    """Reject options that belong to another service or an earlier plugin version."""
+    if not isinstance(args, dict):
+        _error("Tool arguments must be an object.")
+    unknown = sorted(set(args) - set(SERVICE_OPTIONS[service]))
+    if unknown:
+        supported = ", ".join(SERVICE_OPTIONS[service]) or "none"
+        _error(f"Unsupported options: {', '.join(unknown)}. Supported options: {supported}.")
+
+
+def _boolean(args: dict[str, Any], name: str, default: bool) -> bool:
+    value = args.get(name)
+    if value is None:
+        return default
     if not isinstance(value, bool):
         _error(f"{name} must be a boolean.")
     return value
 
 
-def _integer(args: dict[str, Any], name: str, default: int | None, minimum: int) -> int | None:
-    value = args.get(name, default)
-    if value is None and default is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        _error(f"{name} must be an integer of at least {minimum}.")
+def _integer(
+    args: dict[str, Any], name: str, default: int | None, minimum: int,
+    maximum: int = 2**53 - 1,
+) -> int | None:
+    value = args.get(name)
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        _error(f"{name} must be an integer from {minimum} to {maximum}.")
     return value
 
 
-def positive_timeout(value: Any) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        _error("timeout must be a positive finite number.")
-    if not math.isfinite(value) or value <= 0:
-        _error("timeout must be a positive finite number.")
-    return float(value)
-
-
-def _required_text(args: dict[str, Any], name: str) -> str:
+def _optional_text(args: dict[str, Any], name: str) -> str | None:
     value = args.get(name)
+    if value is None:
+        return None
     if not isinstance(value, str) or not value.strip():
-        _error(f"{name} is required.")
+        _error(f"{name} must be a non-empty string.")
     return value.strip()
 
 
-def build_scraper_request(args: dict[str, Any]) -> tuple[dict, int]:
-    url = _required_text(args, "url")
+def _choice(args: dict[str, Any], name: str, choices: tuple[str, ...], default: str) -> str:
+    value = args.get(name)
+    if value is None:
+        return default
+    if value not in choices:
+        _error(f"{name} must be one of: {', '.join(choices)}.")
+    return value
+
+
+def _country(args: dict[str, Any], name: str) -> str:
+    value = args.get(name)
+    if value is None:
+        return "us"
+    if not isinstance(value, str) or len(value) != 2 or not value.isascii() or not value.isalpha():
+        _error(f"{name} must be a two-letter country code.")
+    return value.lower()
+
+
+def _page_url(args: dict[str, Any]) -> str:
+    url = args.get("url")
+    if not isinstance(url, str) or not url.strip():
+        _error("url is required.")
+    url = url.strip()
     if not is_safe_url(url):
-        _error("url must be a safe HTTP or HTTPS URL.")
+        _error("url must be a safe absolute HTTP or HTTPS URL.")
     blocked = check_website_access(url)
     if blocked:
         _error(blocked.get("message") or "Website access blocked.")
-    timeout = _integer(args, "timeout", 120, 1)
-    if timeout > 300:
-        _error("timeout must be between 1 and 300 seconds.")
-    screenshot = _boolean(args, "screenshot", False)
-    rendering = _boolean(args, "browser_rendering", None)
-    headers = args.get("headers")
-    if headers is not None and not isinstance(headers, (dict, str)):
-        _error("headers must be a string or an object of string values.")
-    if isinstance(headers, dict):
-        if any(not isinstance(key, str) or not isinstance(value, str) for key, value in headers.items()):
-            _error("headers must contain string values.")
-        headers = json.dumps(headers)
-    query = {
-        "url": url,
-        "maxRetries": _integer(args, "max_retries", 3, 0),
-        "tokenCap": _integer(args, "token_cap", None, 0),
-        "timeout": timeout,
-        "geoCode": args.get("geo_code", "US"),
-        "proxyCountry": args.get("proxy_country"),
-        "browserRendering": True if screenshot else rendering,
-        "super": True if _boolean(args, "super", False) else None,
-        "useProxy": False if not _boolean(args, "use_proxy", True) else None,
-        "proxy": args.get("proxy"),
-        "html": _boolean(args, "html", True),
-        "markdown": _boolean(args, "markdown", False),
-        "waitForSelector": args.get("wait_for_selector"),
-        "warmStart": True if _boolean(args, "home_page", False) else None,
-        "screenshot": True if screenshot else None,
-        "blockResources": True if _boolean(args, "block_resources", False) else None,
-        "bypassProxy": True if _boolean(args, "bypass_proxy", False) else None,
-        "cookieJar": args.get("cookie_jar"),
-        "headers": headers,
-        "stream": _boolean(args, "stream", None),
+    return url
+
+
+def _page_params(args: dict[str, Any], *, loading: bool) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "url": _page_url(args),
+        "super": _boolean(args, "super", False),
+        "waitUntil": _choice(args, "wait_until", WAIT_UNTIL_EVENTS, "domcontentloaded"),
+        "timeout": _integer(args, "timeout", 300, 1, 300),
+        "geoCode": _country(args, "geo_code"),
+        "proxyCountry": _country(args, "proxy_country"),
+        "saveResult": _boolean(args, "save_result", False),
     }
-    params = {
+    proxy = _optional_text(args, "proxy")
+    if proxy is not None:
+        params["proxy"] = proxy
+    max_retries = _integer(args, "max_retries", None, 0)
+    if max_retries is not None:
+        params["maxRetries"] = max_retries
+    if loading:
+        params["blockResources"] = _boolean(args, "block_resources", False)
+        selector = _optional_text(args, "wait_for_selector")
+        if selector is not None:
+            params["waitForSelector"] = selector
+        params["returnCookie"] = _boolean(args, "return_cookie", False)
+    return params
+
+
+def encode(params: dict[str, Any]) -> dict[str, str]:
+    """Serialize query values the way the MrScraper CLI and SDKs send them."""
+    return {
         key: str(value).lower() if isinstance(value, bool) else str(value)
-        for key, value in query.items() if value is not None
+        for key, value in params.items()
     }
-    return params, timeout
 
 
-def build_search_request(args: dict[str, Any]) -> tuple[dict, float]:
-    removed = {"raw", "format", "language", "page", "render_js"}.intersection(args)
-    if removed:
-        _error(f"Unsupported Web Search options: {', '.join(sorted(removed))}. Use region and num_results.")
-    query = _required_text(args, "url")
-    region = None
-    parsed = urlparse(query)
-    if parsed.scheme.lower() in {"http", "https"}:
-        values = parse_qs(parsed.query)
-        query = values.get("q", [""])[0].strip()
-        if not query:
-            _error("Search URL must contain a q parameter.")
-        region = values.get("gl", [None])[0]
-    country = args.get("region") or region or "us"
-    if not isinstance(country, str) or len(country) != 2 or not country.isascii() or not country.isalpha():
-        _error("region must be a two-letter country code.")
-    num_results = _integer(args, "num_results", 10, 10)
-    if num_results > 100:
-        _error("num_results must be between 10 and 100.")
-    body = {
+def build_page_request(service: str, args: dict[str, Any]) -> tuple[dict[str, str], int]:
+    """Build Scrape HTML, Scrape Markdown, or Get screenshot GET query parameters."""
+    check_options(service, args)
+    params = _page_params(args, loading=True)
+    if service == "scrape_html":
+        params.update(
+            browserRendering=_boolean(args, "browser_rendering", False),
+            warmStart=_boolean(args, "warm_start", False),
+            html=True, markdown=False, screenshot=False,
+        )
+    elif service == "scrape_markdown":
+        html = _boolean(args, "html", False)
+        params.update(
+            # The API needs browser rendering to return HTML and Markdown together.
+            browserRendering=html or _boolean(args, "browser_rendering", False),
+            warmStart=_boolean(args, "warm_start", False),
+            html=html, markdown=True, screenshot=False,
+        )
+    elif service == "get_screenshot":
+        params.update(
+            browserRendering=True,
+            warmStart=_boolean(args, "warm_start", False),
+            screenshot=_choice(args, "screenshot", SCREENSHOT_AREAS, "full"),
+            html=_boolean(args, "html", True),
+            markdown=_boolean(args, "markdown", False),
+        )
+    else:
+        raise ValueError(f"Unsupported page service: {service}")
+    return encode(params), params["timeout"] + TRANSPORT_GRACE_SECONDS
+
+
+def build_json_request(
+    args: dict[str, Any], base_url: str,
+) -> tuple[str, dict[str, str], dict[str, str] | None, int]:
+    """Scrape JSON uses GET unless the encoded URL exceeds 8,000 characters."""
+    check_options("scrape_json", args)
+    prompt = args.get("prompt")
+    if prompt is None:
+        prompt = DEFAULT_JSON_PROMPT
+    if not isinstance(prompt, str) or not prompt.strip():
+        _error("prompt must be a non-empty string.")
+    params = _page_params(args, loading=False)
+    params.update(
+        browserRendering=_boolean(args, "browser_rendering", False),
+        html=_boolean(args, "html", False),
+        screenshot=_boolean(args, "screenshot", False),
+        agent="general",
+        prompt=prompt,
+    )
+    query = encode(params)
+    timeout = params["timeout"] + TRANSPORT_GRACE_SECONDS
+    if len(f"{base_url}?{urlencode(query)}") <= MAX_GET_URL_LENGTH:
+        return "GET", query, None, timeout
+    body = {key: query.pop(key) for key in ("url", "prompt", "agent")}
+    return "POST", query, body, timeout
+
+
+def build_brand_request(args: dict[str, Any]) -> tuple[dict[str, str], int]:
+    check_options("scrape_brand", args)
+    params = {"action": "brand-scraping", "url": _page_url(args), "bundle": "none"}
+    return encode(params), BRAND_AND_SEARCH_TIMEOUT
+
+
+def build_search_request(args: dict[str, Any]) -> tuple[dict[str, str], int]:
+    check_options("web_search", args)
+    query = args.get("query")
+    if not isinstance(query, str) or not 1 <= len(query.strip()) <= 1000:
+        _error("query must be 1 to 1000 characters.")
+    params = {
         "action": "websearch",
-        "query": query,
-        "country": country.lower(),
-        "numResults": num_results,
+        "query": query.strip(),
+        "country": _country(args, "country"),
+        "numResults": _integer(args, "num_results", 10, 10, 100),
     }
-    return body, positive_timeout(args.get("timeout", 600))
+    return encode(params), BRAND_AND_SEARCH_TIMEOUT

@@ -7,6 +7,9 @@ from typing import Any, Dict, List, Mapping
 from agent.web_search_provider import WebSearchProvider
 from .client import MrScraperClient, MrScraperError, is_mrscraper_available
 
+_EXTRACT_TIMEOUT = 120
+_EXTRACT_RETRIES = 3
+
 
 def _nested(value: Any, *path: str) -> Any:
     for key in path:
@@ -81,7 +84,7 @@ class MrScraperWebSearchProvider(WebSearchProvider):
         try:
             limit = max(1, int(limit))
             payload = MrScraperClient().web_search({
-                "url": query, "num_results": min(100, max(10, limit)),
+                "query": query, "num_results": min(100, max(10, limit)),
             })["data"]
             if isinstance(payload, Mapping) and payload.get("success") is False:
                 raise MrScraperError("MrScraper reported a search failure.")
@@ -103,12 +106,12 @@ class MrScraperWebSearchProvider(WebSearchProvider):
     def extract(self, urls: List[str], **kwargs: Any) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []
         requested_format = str(kwargs.get("format") or "markdown").lower()
+        client_method = "scrape_markdown" if requested_format == "markdown" else "scrape_html"
         for url in urls:
             try:
-                payload = MrScraperClient().scraper_api({
-                    "url": url,
-                    "html": requested_format != "markdown",
-                    "markdown": requested_format == "markdown",
+                # Bound standard extraction the way the 3.x provider did.
+                payload = getattr(MrScraperClient(), client_method)({
+                    "url": url, "timeout": _EXTRACT_TIMEOUT, "max_retries": _EXTRACT_RETRIES,
                 })["data"]
                 content, title, metadata = _rendered_content(payload)
                 results.append({

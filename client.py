@@ -1,18 +1,23 @@
-"""Direct HTTP adapter for MrScraper page, search, and account operations."""
+"""Direct HTTP adapter for the seven MrScraper services."""
 
 from __future__ import annotations
 
-import math
 from typing import Any
 from urllib.parse import quote, quote_plus
 
 import requests
 
 from agent.secret_scope import get_secret
-from .request_options import build_scraper_request, build_search_request, positive_timeout
+from .request_options import (
+    STATUS_TIMEOUT,
+    build_brand_request,
+    build_json_request,
+    build_page_request,
+    build_search_request,
+    check_options,
+)
 
 SCRAPER_API_URL = "https://api.mrscraper.com/"
-WEB_SEARCH_API_URL = "https://api.mrscraper.com/"
 ACCOUNT_API_URL = "https://api.app.mrscraper.com/api/v1/subscription-accounts"
 _SENSITIVE_HEADERS = {
     "authorization", "proxy-authorization", "set-cookie", "set-cookie2", "x-api-token",
@@ -56,20 +61,12 @@ def _redact(value: Any, token: str) -> Any:
     return value
 
 
-def _number(value: Any) -> float:
-    try:
-        number = float(value)
-    except (ValueError, TypeError):
-        return 0
-    return number if math.isfinite(number) else 0
-
-
-def _string(value: Any) -> str | None:
-    return value if isinstance(value, str) else None
-
-
 class MrScraperClient:
-    """Synchronous adapter for MrScraper's REST API."""
+    """Synchronous adapter for MrScraper's REST API.
+
+    Every method takes the tool's argument object and returns the common
+    response envelope: ``status_code``, ``data``, and filtered ``headers``.
+    """
 
     def __init__(self, token: str | None = None) -> None:
         self.token = get_mrscraper_token() if token is None else token.strip()
@@ -81,7 +78,7 @@ class MrScraperClient:
         method: str,
         url: str,
         *,
-        params: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
         body: dict[str, Any] | None = None,
         timeout: float,
     ) -> dict[str, Any]:
@@ -101,7 +98,7 @@ class MrScraperClient:
                 allow_redirects=False,
             )
         except requests.RequestException as exc:
-            # URLs can contain the API token, proxy passwords and target headers.
+            # Exception text can echo proxy credentials, cookies, and target headers.
             raise MrScraperAPIError(
                 f"MrScraper request failed ({type(exc).__name__})."
             ) from None
@@ -112,7 +109,8 @@ class MrScraperClient:
                 else f"MrScraper API returned HTTP {response.status_code}."
             )
             raise MrScraperAPIError(message, status_code=response.status_code)
-        if "application/json" in response.headers.get("Content-Type", "").lower():
+        content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if content_type == "application/json" or content_type.endswith("+json"):
             try:
                 data = response.json()
             except ValueError:
@@ -129,46 +127,31 @@ class MrScraperClient:
             },
         }
 
-    def scraper_api(self, args: dict[str, Any]) -> dict[str, Any]:
-        params, timeout = build_scraper_request(args)
-        return self._request(
-            "GET", SCRAPER_API_URL,
-            params={"token": self.token, **params}, timeout=timeout + 30,
-        )
+    def status(self, args: dict[str, Any]) -> dict[str, Any]:
+        check_options("status", args)
+        return self._request("GET", ACCOUNT_API_URL, timeout=STATUS_TIMEOUT)
+
+    def _page(self, service: str, args: dict[str, Any]) -> dict[str, Any]:
+        params, timeout = build_page_request(service, args)
+        return self._request("GET", SCRAPER_API_URL, params=params, timeout=timeout)
+
+    def scrape_html(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._page("scrape_html", args)
+
+    def scrape_markdown(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._page("scrape_markdown", args)
+
+    def get_screenshot(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._page("get_screenshot", args)
+
+    def scrape_brand(self, args: dict[str, Any]) -> dict[str, Any]:
+        params, timeout = build_brand_request(args)
+        return self._request("GET", SCRAPER_API_URL, params=params, timeout=timeout)
+
+    def scrape_json(self, args: dict[str, Any]) -> dict[str, Any]:
+        method, params, body, timeout = build_json_request(args, SCRAPER_API_URL)
+        return self._request(method, SCRAPER_API_URL, params=params, body=body, timeout=timeout)
 
     def web_search(self, args: dict[str, Any]) -> dict[str, Any]:
-        body, timeout = build_search_request(args)
-        return self._request("POST", WEB_SEARCH_API_URL, body=body, timeout=timeout)
-
-    def account(self, args: dict[str, Any]) -> dict[str, Any]:
-        timeout = positive_timeout(args.get("timeout", 30))
-        result = self._request("GET", ACCOUNT_API_URL, timeout=timeout)
-        body = result["data"]
-        details = body.get("data", body) if isinstance(body, dict) else body
-        if not isinstance(details, dict):
-            raise MrScraperAPIError(
-                "Account response must contain an object.", status_code=result["status_code"]
-            )
-        usage = _number(details.get("tokenUsage"))
-        limit = _number(details.get("tokenLimit"))
-        user = details.get("user")
-        user = user if isinstance(user, dict) else {}
-        # Account responses also contain API tokens and billing identifiers.
-        result["data"] = {
-            "subscription_status": _string(details.get("stripeStatus")),
-            "enterprise": bool(details.get("isEnterprise")),
-            "token_usage": usage,
-            "token_limit": limit,
-            "token_remaining": max(0, limit - usage),
-            "usage_percent": round(usage / limit * 100, 2) if limit > 0 else 0,
-            "rate_limit": None if details.get("rateLimit") is None else _number(details["rateLimit"]),
-            "rate_ttl": None if details.get("rateTtl") is None else _number(details["rateTtl"]),
-            "auto_renew": bool(details.get("isAutoRenew")),
-            "ends_at": _string(details.get("endsAt")),
-            "user": {
-                "name": _string(user.get("name")),
-                "email": _string(user.get("email")),
-                "verified": bool(user.get("isVerified")),
-            },
-        }
-        return result
+        params, timeout = build_search_request(args)
+        return self._request("GET", SCRAPER_API_URL, params=params, timeout=timeout)
