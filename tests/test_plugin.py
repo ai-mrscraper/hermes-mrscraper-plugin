@@ -32,16 +32,16 @@ TOOL_NAMES = {
     "mrscraper_get_screenshot", "mrscraper_scrape_brand", "mrscraper_scrape_json",
     "mrscraper_web_search",
 }
-PAGE_DEFAULTS = {
-    "url": PAGE_URL, "super": "false", "waitUntil": "domcontentloaded", "timeout": "300",
-    "geoCode": "us", "proxyCountry": "us", "saveResult": "false",
-}
-LOADING_DEFAULTS = {"blockResources": "false", "returnCookie": "false"}
+SHARED_DEFAULTS = {"timeout": "300", "saveResult": "true", "maxAge": "0"}
+LOADING_DEFAULTS = {"warmStart": "false", "blockResources": "false"}
+REMOVED = ("super", "wait_until", "proxy_country", "proxy", "return_cookie", "markdown")
 STANDARD = {
     "url": "Absolute HTTP or HTTPS URL of the page to process.",
-    "timeout": "Page load timeout in seconds, from 1 to 300. The HTTP request allows 30 additional seconds.",
-    "warm_start": "Whether to enable warm start for more reliable scraping, at the cost of additional latency.",
-    "screenshot": "Screenshot area to capture: full for the entire page or top for the top viewport.",
+    "timeout": "Maximum seconds to wait for the scrape, from 1 to 330. The HTTP request allows 30 additional seconds.",
+    "warm_start": "Whether to open the site's home page first to warm the session before loading the target URL.",
+    "browser_rendering": "Whether to load the page in a browser: true always does and false never does. Omit it to load the page without a browser first and switch to a browser automatically if the request is blocked.",
+    "max_age": "Return a cached result of the same request when it is newer than the selected age. A cached result costs the same tokens as the original scrape.",
+    "screenshot": "Screenshot to capture with the HTML: false for none, full for the entire page, top for the first viewport, or a WIDTHxHEIGHT viewport from 100 to 3840 pixels with an optional -ZOOM percent from 25 to 300, such as 1280x800 or 1920x1080-75. Setting a screenshot also sends browserRendering=true.",
     "query": "Search query text, trimmed before sending, containing 1 to 1000 characters.",
 }
 
@@ -190,29 +190,54 @@ def test_seven_tools_register_with_standard_schemas(installed_plugin):
     for name in TOOL_NAMES:
         assert registry.get_entry(name, scope=plugin.manager.scope_key).schema == schemas[name]
     params = {name: schema["parameters"]["properties"] for name, schema in schemas.items()}
+    loading = ["browser_rendering", "timeout", "warm_start", "block_resources", "wait_for_selector"]
+    cache = ["geo_code", "save_result", "max_age", "token_cap", "max_retries"]
     assert params["mrscraper_status"] == {}
-    assert set(params["mrscraper_scrape_brand"]) == {"url"}
-    assert set(params["mrscraper_web_search"]) == {"query", "country", "num_results"}
-    assert set(params["mrscraper_get_screenshot"]) == {
-        "url", "timeout", "geo_code", "proxy_country", "super", "wait_until", "proxy",
-        "max_retries", "save_result", "block_resources", "wait_for_selector", "return_cookie",
-        "warm_start", "screenshot", "html", "markdown",
-    }
-    assert "warm_start" not in params["mrscraper_scrape_json"]
-    for name in ("mrscraper_scrape_html", "mrscraper_scrape_markdown", "mrscraper_get_screenshot"):
+    assert list(params["mrscraper_scrape_html"]) == ["url", *loading, "action", *cache, "screenshot"]
+    assert list(params["mrscraper_scrape_markdown"]) == ["url", *loading, "action", *cache]
+    assert list(params["mrscraper_get_screenshot"]) == ["url", "timeout", "wait_for_selector", *cache]
+    assert list(params["mrscraper_scrape_brand"]) == ["url"]
+    assert list(params["mrscraper_scrape_json"]) == ["url", "prompt", "html", *loading, *cache, "screenshot"]
+    assert list(params["mrscraper_web_search"]) == ["query", "country", "num_results"]
+    for name in TOOL_NAMES:
+        assert not set(REMOVED) & set(params[name]), name
+    for name in ("mrscraper_scrape_html", "mrscraper_scrape_markdown", "mrscraper_scrape_json"):
         assert params[name]["warm_start"] == {
-            "type": "boolean", "default": False, "description": STANDARD["warm_start"],
+            "type": "boolean", "description": STANDARD["warm_start"], "default": False,
         }
+        assert params[name]["browser_rendering"] == {
+            "type": "boolean", "description": STANDARD["browser_rendering"],
+        }
+    for name in ("mrscraper_scrape_html", "mrscraper_scrape_markdown",
+                 "mrscraper_get_screenshot", "mrscraper_scrape_json"):
         assert params[name]["url"]["description"] == STANDARD["url"]
-        assert params[name]["timeout"]["description"] == STANDARD["timeout"]
-    assert params["mrscraper_get_screenshot"]["screenshot"]["enum"] == ["full", "top"]
-    assert params["mrscraper_get_screenshot"]["screenshot"]["description"] == STANDARD["screenshot"]
-    assert params["mrscraper_get_screenshot"]["html"]["default"] is True
-    assert params["mrscraper_scrape_json"]["screenshot"]["type"] == "boolean"
+        assert params[name]["timeout"] == {
+            "type": "integer", "minimum": 1, "maximum": 330, "default": 300,
+            "description": STANDARD["timeout"],
+        }
+        assert params[name]["save_result"]["default"] is True
+        assert params[name]["max_age"] == {
+            "type": "integer", "minimum": 0, "maximum": 604800000, "default": 0,
+            "description": STANDARD["max_age"],
+        }
+        assert params[name]["wait_for_selector"]["maxLength"] == 500
+        for optional in ("geo_code", "token_cap", "max_retries", "wait_for_selector"):
+            assert "default" not in params[name][optional], (name, optional)
+    capture = params["mrscraper_scrape_html"]["screenshot"]
+    assert capture["type"] == "string" and capture["default"] == "false"
+    assert capture["description"] == STANDARD["screenshot"]
+    assert params["mrscraper_scrape_json"]["screenshot"] == {
+        "type": "boolean", "description": "Whether to include a base64 screenshot in the response.",
+        "default": False,
+    }
+    assert params["mrscraper_scrape_json"]["html"]["default"] is True
+    assert "default" not in params["mrscraper_web_search"]["country"]
     assert params["mrscraper_web_search"]["query"]["description"] == STANDARD["query"]
     assert schemas["mrscraper_get_screenshot"]["description"] == (
-        "Capture a base64 screenshot of the full page or top viewport. "
-        "Browser rendering is always enabled."
+        "Capture a base64 PNG screenshot of the full page. Browser rendering is always enabled."
+    )
+    assert schemas["mrscraper_scrape_markdown"]["description"] == (
+        "Retrieve a page as clean Markdown. Browser rendering is optional."
     )
 
 
@@ -223,59 +248,81 @@ def test_page_tools_match_cli_wire_contract(installed_plugin):
     request = plugin.requests[-1]
     assert html["status_code"] == 200 and html["data"] == "<h1>Local page</h1>"
     assert request["method"] == "GET" and request["path"] == "/api" and request["body"] is None
-    assert request["flat"] == {
-        **PAGE_DEFAULTS, **LOADING_DEFAULTS, "browserRendering": "false",
-        "warmStart": "false", "html": "true", "markdown": "false", "screenshot": "false",
-    }
+    assert list(request["flat"].items()) == [
+        ("url", PAGE_URL), ("html", "true"), ("timeout", "300"), ("warmStart", "false"),
+        ("blockResources", "false"), ("saveResult", "true"), ("maxAge", "0"),
+        ("screenshot", "false"),
+    ]
     assert plugin.timeouts[-1] == 300 + 30
 
     target_url = PAGE_URL + "?q=a%2Bb&tag=café#section"
     _call(plugin, "mrscraper_scrape_html", {
-        "url": target_url, "timeout": 120, "geo_code": "ID", "proxy_country": "SG",
-        "super": True, "wait_until": "networkidle2", "proxy": "http://proxy.example.com:8080",
-        "max_retries": 0, "save_result": True, "block_resources": True,
-        "wait_for_selector": " body ", "return_cookie": True,
-        "browser_rendering": True, "warm_start": True,
+        "url": target_url, "browser_rendering": False, "timeout": 330, "warm_start": True,
+        "block_resources": True, "wait_for_selector": " body ", "action": " product-flow ",
+        "geo_code": "ID", "save_result": False, "max_age": 3600000, "token_cap": 50,
+        "max_retries": 0, "screenshot": "1920x1080-75",
     })
-    assert plugin.requests[-1]["flat"] == {
-        "url": target_url, "super": "true", "waitUntil": "networkidle2", "timeout": "120",
-        "geoCode": "id", "proxyCountry": "sg", "saveResult": "true",
-        "proxy": "http://proxy.example.com:8080", "maxRetries": "0",
-        "blockResources": "true", "waitForSelector": "body", "returnCookie": "true",
-        "browserRendering": "true", "warmStart": "true",
-        "html": "true", "markdown": "false", "screenshot": "false",
-    }
-    assert plugin.timeouts[-1] == 120 + 30
+    # A screenshot sends browserRendering=true even when browser_rendering is false.
+    assert list(plugin.requests[-1]["flat"].items()) == [
+        ("url", target_url), ("html", "true"), ("browserRendering", "true"),
+        ("timeout", "330"), ("warmStart", "true"), ("blockResources", "true"),
+        ("waitForSelector", "body"), ("action", "product-flow"), ("geoCode", "id"),
+        ("saveResult", "false"), ("maxAge", "3600000"), ("tokenCap", "50"),
+        ("maxRetries", "0"), ("screenshot", "1920x1080-75"),
+    ]
+    assert plugin.timeouts[-1] == 330 + 30
+
+    for rendering in (None, True, False):
+        for capture in ("full", "top", "1280x800"):
+            arguments = {"url": PAGE_URL, "screenshot": capture}
+            if rendering is not None:
+                arguments["browser_rendering"] = rendering
+            _call(plugin, "mrscraper_scrape_html", arguments)
+            flat = plugin.requests[-1]["flat"]
+            assert flat["browserRendering"] == "true" and flat["screenshot"] == capture
+            assert list(flat)[:3] == ["url", "html", "browserRendering"]
+        _call(plugin, "mrscraper_scrape_html", {
+            "url": PAGE_URL, "screenshot": False,
+            **({} if rendering is None else {"browser_rendering": rendering}),
+        })
+        flat = plugin.requests[-1]["flat"]
+        assert flat.get("browserRendering") == (None if rendering is None else str(rendering).lower())
+        assert flat["screenshot"] == "false"
 
     markdown = _call(plugin, "mrscraper_scrape_markdown", {"url": PAGE_URL})
     assert markdown["data"] == "# Local page"
     assert plugin.requests[-1]["flat"] == {
-        **PAGE_DEFAULTS, **LOADING_DEFAULTS, "browserRendering": "false",
-        "warmStart": "false", "html": "false", "markdown": "true", "screenshot": "false",
+        "url": PAGE_URL, "markdown": "true", **SHARED_DEFAULTS, **LOADING_DEFAULTS,
     }
-    _call(plugin, "mrscraper_scrape_markdown", {"url": PAGE_URL, "html": True, "warm_start": True})
-    combined = plugin.requests[-1]["flat"]
-    assert (combined["browserRendering"], combined["warmStart"], combined["html"]) == (
-        "true", "true", "true")
+    _call(plugin, "mrscraper_scrape_markdown", {
+        "url": PAGE_URL, "browser_rendering": True, "action": "docs", "max_age": 86400000,
+    })
+    assert list(plugin.requests[-1]["flat"].items()) == [
+        ("url", PAGE_URL), ("markdown", "true"), ("browserRendering", "true"),
+        ("timeout", "300"), ("warmStart", "false"), ("blockResources", "false"),
+        ("action", "docs"), ("saveResult", "true"), ("maxAge", "86400000"),
+    ]
 
     screenshot = _call(plugin, "mrscraper_get_screenshot", {"url": PAGE_URL})
     assert screenshot["data"]["screenshot"] == "BASE64_PNG_DATA"
-    assert plugin.requests[-1]["flat"] == {
-        **PAGE_DEFAULTS, **LOADING_DEFAULTS, "browserRendering": "true",
-        "warmStart": "false", "screenshot": "full", "html": "true", "markdown": "false",
-    }
+    assert list(plugin.requests[-1]["flat"].items()) == [
+        ("url", PAGE_URL), ("screenshot", "full"), ("browserRendering", "true"),
+        ("timeout", "300"), ("saveResult", "true"), ("maxAge", "0"),
+    ]
     _call(plugin, "mrscraper_get_screenshot", {
-        "url": PAGE_URL, "warm_start": True, "screenshot": "top",
-        "html": False, "markdown": True, "timeout": 60,
+        "url": PAGE_URL, "timeout": 60, "wait_for_selector": "#results", "geo_code": "DE",
+        "save_result": False, "token_cap": 10, "max_retries": 1,
     })
-    assert plugin.requests[-1]["flat"] == {
-        **PAGE_DEFAULTS, **LOADING_DEFAULTS, "timeout": "60", "browserRendering": "true",
-        "warmStart": "true", "screenshot": "top", "html": "false", "markdown": "true",
-    }
+    assert list(plugin.requests[-1]["flat"].items()) == [
+        ("url", PAGE_URL), ("screenshot", "full"), ("browserRendering", "true"),
+        ("timeout", "60"), ("waitForSelector", "#results"), ("geoCode", "de"),
+        ("saveResult", "false"), ("maxAge", "0"), ("tokenCap", "10"), ("maxRetries", "1"),
+    ]
     assert plugin.timeouts[-1] == 60 + 30
 
     for request in plugin.requests:
         assert "token" not in request["query"]
+        assert not {"super", "waitUntil", "proxyCountry", "proxy", "returnCookie"} & set(request["flat"])
         assert request["headers"]["x-api-token"] == SCOPED_TOKEN
         assert request["headers"]["authorization"] == f"Bearer {SCOPED_TOKEN}"
     for response in (html, markdown, screenshot):
@@ -307,12 +354,25 @@ def test_status_brand_json_and_search_match_cli_wire_contract(installed_plugin):
 
     extracted = _call(plugin, "mrscraper_scrape_json", {"url": PAGE_URL})
     assert plugin.requests[-1]["method"] == "GET" and plugin.requests[-1]["body"] is None
-    assert plugin.requests[-1]["flat"] == {
-        **PAGE_DEFAULTS, "browserRendering": "false", "html": "false", "screenshot": "false",
-        "agent": "general", "prompt": "Extract all data as complete as possible.",
-    }
+    assert list(plugin.requests[-1]["flat"].items()) == [
+        ("url", PAGE_URL), ("prompt", "Extract all data as complete as possible."),
+        ("agent", "general"), ("html", "true"), ("timeout", "300"), ("warmStart", "false"),
+        ("blockResources", "false"), ("saveResult", "true"), ("maxAge", "0"),
+        ("screenshot", "false"),
+    ]
     assert plugin.timeouts[-1] == 330
     assert extracted["data"]["data"][0]["title"] == "Item"
+
+    _call(plugin, "mrscraper_scrape_json", {
+        "url": PAGE_URL, "html": False, "screenshot": True, "warm_start": True,
+        "block_resources": True, "wait_for_selector": "body", "geo_code": "SG",
+    })
+    flat = plugin.requests[-1]["flat"]
+    # Scrape JSON's boolean screenshot does not force browser rendering.
+    assert "browserRendering" not in flat
+    assert (flat["html"], flat["screenshot"], flat["warmStart"], flat["blockResources"]) == (
+        "false", "true", "true", "true")
+    assert (flat["waitForSelector"], flat["geoCode"]) == ("body", "sg")
 
     schema_prompt = "Extract every item. Json Schema: " + json.dumps(
         {"type": "array", "items": {"type": "object", "description": "x" * 9000}})
@@ -323,11 +383,11 @@ def test_status_brand_json_and_search_match_cli_wire_contract(installed_plugin):
     long_request = plugin.requests[-1]
     assert long_request["method"] == "POST"
     assert long_request["body"] == {"url": PAGE_URL, "prompt": schema_prompt, "agent": "general"}
-    assert long_request["flat"] == {
-        **{key: value for key, value in PAGE_DEFAULTS.items() if key != "url"},
-        "timeout": "90", "maxRetries": "2", "browserRendering": "true",
-        "html": "true", "screenshot": "true",
-    }
+    assert list(long_request["flat"].items()) == [
+        ("html", "true"), ("browserRendering", "true"), ("timeout", "90"),
+        ("warmStart", "false"), ("blockResources", "false"), ("saveResult", "true"),
+        ("maxAge", "0"), ("maxRetries", "2"), ("screenshot", "true"),
+    ]
     assert plugin.timeouts[-1] == 90 + 30
 
     searched = _call(plugin, "mrscraper_web_search", {
@@ -342,7 +402,7 @@ def test_status_brand_json_and_search_match_cli_wire_contract(installed_plugin):
     assert searched["data"]["data"][0]["title"] == "First"
     _call(plugin, "mrscraper_web_search", {"query": "café & tea"})
     assert plugin.requests[-1]["flat"] == {
-        "action": "websearch", "query": "café & tea", "country": "us", "numResults": "10",
+        "action": "websearch", "query": "café & tea", "numResults": "10",
     }
     for request in plugin.requests:
         assert "token" not in request["query"]
@@ -361,7 +421,7 @@ def test_standard_web_provider_uses_search_and_page_services(installed_plugin):
         }]},
     }
     assert plugin.requests[-1]["flat"] == {
-        "action": "websearch", "query": "hermes agent", "country": "us", "numResults": "10",
+        "action": "websearch", "query": "hermes agent", "numResults": "10",
     }
     provider.search("more results", limit=25)
     assert plugin.requests[-1]["flat"]["numResults"] == "25"
@@ -372,12 +432,12 @@ def test_standard_web_provider_uses_search_and_page_services(installed_plugin):
     assert extracted[0]["url"] == PAGE_URL
     assert extracted[0]["content"] == extracted[0]["raw_content"] == "# Local page"
     request = plugin.requests[-1]["flat"]
-    assert (request["markdown"], request["html"], request["timeout"], request["maxRetries"]) == (
-        "true", "false", "120", "3")
+    assert (request["markdown"], request["timeout"], request["maxRetries"]) == ("true", "120", "3")
+    assert "html" not in request
     as_html = provider.extract([PAGE_URL], format="html")
     assert as_html[0]["content"] == "<h1>Local page</h1>"
-    assert (plugin.requests[-1]["flat"]["html"], plugin.requests[-1]["flat"]["markdown"]) == (
-        "true", "false")
+    assert plugin.requests[-1]["flat"]["html"] == "true"
+    assert "markdown" not in plugin.requests[-1]["flat"]
 
     plugin.responses["markdown"] = (200, {"data": {
         "markdown": "# Nested page", "title": "Nested page",
@@ -388,24 +448,42 @@ def test_standard_web_provider_uses_search_and_page_services(installed_plugin):
 
 @pytest.mark.parametrize(("name", "options"), [
     ("mrscraper_status", {"timeout": 30}),
-    ("mrscraper_scrape_html", {"url": PAGE_URL, "timeout": 301}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "timeout": 331}),
     ("mrscraper_scrape_html", {"url": PAGE_URL, "timeout": 0}),
     ("mrscraper_scrape_html", {"url": PAGE_URL, "max_retries": -1}),
     ("mrscraper_scrape_html", {"url": PAGE_URL, "geo_code": "usa"}),
-    ("mrscraper_scrape_html", {"url": PAGE_URL, "wait_until": "idle"}),
     ("mrscraper_scrape_html", {"url": PAGE_URL, "warm_start": "yes"}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "browser_rendering": "auto"}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "save_result": "false"}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "max_age": -1}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "max_age": 604800001}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "token_cap": 0}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "wait_for_selector": "a" * 501}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "action": " "}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "screenshot": True}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "screenshot": "middle"}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "screenshot": "99x800"}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "screenshot": "1280x800-301"}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "screenshot": "top", "browser_rendering": "no"}),
     ("mrscraper_scrape_html", {"url": PAGE_URL, "home_page": True}),
-    ("mrscraper_scrape_html", {"url": PAGE_URL, "token_cap": 5}),
     ("mrscraper_scrape_html", {"url": PAGE_URL, "use_proxy": False}),
-    ("mrscraper_scrape_html", {"url": PAGE_URL, "markdown": True}),
-    ("mrscraper_scrape_markdown", {"url": PAGE_URL, "screenshot": True}),
-    ("mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": True}),
-    ("mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": "middle"}),
+    *[("mrscraper_scrape_html", {"url": PAGE_URL, name: value}) for name, value in (
+        ("super", True), ("wait_until", "load"), ("proxy_country", "sg"),
+        ("proxy", "http://proxy.example.com:8080"), ("return_cookie", True), ("markdown", True),
+    )],
+    ("mrscraper_scrape_markdown", {"url": PAGE_URL, "html": True}),
+    ("mrscraper_scrape_markdown", {"url": PAGE_URL, "screenshot": "top"}),
+    ("mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": "top"}),
     ("mrscraper_get_screenshot", {"url": PAGE_URL, "browser_rendering": False}),
+    ("mrscraper_get_screenshot", {"url": PAGE_URL, "warm_start": True}),
+    ("mrscraper_get_screenshot", {"url": PAGE_URL, "html": False}),
+    ("mrscraper_get_screenshot", {"url": PAGE_URL, "action": "flow"}),
     ("mrscraper_scrape_json", {"url": PAGE_URL, "prompt": "  "}),
-    ("mrscraper_scrape_json", {"url": PAGE_URL, "warm_start": True}),
+    ("mrscraper_scrape_json", {"url": PAGE_URL, "action": "flow"}),
     ("mrscraper_scrape_json", {"url": PAGE_URL, "screenshot": "top"}),
+    ("mrscraper_scrape_json", {"url": PAGE_URL, "html": "true"}),
     ("mrscraper_scrape_brand", {"url": PAGE_URL, "timeout": 60}),
+    ("mrscraper_scrape_brand", {"url": PAGE_URL, "max_age": 0}),
     ("mrscraper_web_search", {"query": "   "}),
     ("mrscraper_web_search", {"query": "x" * 1001}),
     ("mrscraper_web_search", {"query": "hermes", "num_results": 9}),
@@ -447,7 +525,7 @@ def test_validation_scope_and_error_redaction_precede_transport(installed_plugin
         ("account", "mrscraper_status", {}),
         ("html", "mrscraper_scrape_html", {"url": PAGE_URL}),
         ("markdown", "mrscraper_scrape_markdown", {"url": PAGE_URL}),
-        ("screenshot", "mrscraper_get_screenshot", {"url": PAGE_URL, "warm_start": True}),
+        ("screenshot", "mrscraper_get_screenshot", {"url": PAGE_URL}),
         ("brand", "mrscraper_scrape_brand", {"url": PAGE_URL}),
         ("json", "mrscraper_scrape_json", {"url": PAGE_URL}),
         ("search", "mrscraper_web_search", {"query": "hermes agent"}),
