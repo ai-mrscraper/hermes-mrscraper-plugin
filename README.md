@@ -107,13 +107,13 @@ and `mrscraper_scrape_json` share these parameters:
 | `timeout` (`timeout`) | integer | `300` | Maximum seconds to wait for the scrape, from 1 to 330. The HTTP request allows 30 additional seconds. |
 | `wait_for_selector` (`waitForSelector`) | string | Omitted | CSS selector or text to wait for on the page before returning the result, up to 500 characters. |
 | `geo_code` (`geoCode`) | string | Omitted | Two-letter country code to load the page from, sent in lowercase. |
-| `save_result` (`saveResult`) | boolean | `true` | Whether to save the result to the dashboard Result tab. |
 | `max_age` (`maxAge`) | integer | `0` | Return a cached result of the same request when it is newer than the selected age. A cached result costs the same tokens as the original scrape. |
-| `token_cap` (`tokenCap`) | integer | Omitted | Maximum total tokens the scrape and its retries can use, as a positive integer. Omit this parameter for no limit. |
 | `max_retries` (`maxRetries`) | integer | Omitted | Maximum number of retries, as a nonnegative integer. Omit this parameter for no limit. |
 
 `max_age` is in milliseconds, up to 604800000 (7 days); `0` always scrapes fresh.
-When `geo_code` is omitted, the API loads the page from the United States.
+When `geo_code` is omitted, the API loads the page from the United States. These
+four tools always send `saveResult=true`, so their results are saved to the
+MrScraper dashboard; `tokenCap` is never sent.
 
 ### Loading controls
 
@@ -152,7 +152,7 @@ Page and loading controls, plus:
 {"url": "https://example.com", "browser_rendering": true, "warm_start": true, "wait_for_selector": "body", "timeout": 120}
 ```
 
-The request sends `html=true`. Any `screenshot` other than `false` also sends
+The request sends `html=true` and `markdown=false`. Any `screenshot` other than `false` also sends
 `browserRendering=true`, whatever `browser_rendering` is set to. An `action` must
 name a scraper flow configured for the target host. The response body is HTML
 text; with a screenshot, the API returns JSON containing `html` and a base64
@@ -166,7 +166,8 @@ Page and loading controls, plus `action` (as in Scrape HTML).
 {"url": "https://example.com", "warm_start": true, "max_age": 86400000}
 ```
 
-The request sends `markdown=true`. The response body is Markdown text.
+The request sends `markdown=true`, `html=false`, and `screenshot=false`. The
+response body is Markdown text.
 
 ### Get screenshot
 
@@ -176,16 +177,17 @@ Page controls only.
 {"url": "https://example.com", "wait_for_selector": "body", "timeout": 120}
 ```
 
-The request sends `screenshot=full` and `browserRendering=true`; the screenshot
-area and browser rendering are not parameters. The response body contains a
-base64 PNG `screenshot` of the full page and the page `html`.
+The request sends `screenshot=full`, `html=false`, `markdown=false`, and
+`browserRendering=true`; the screenshot area, outputs, and browser rendering are not
+parameters. The response body contains a base64 PNG `screenshot` of the full page
+and the page `html`, which the API includes even though `html=false` is sent.
 
 ### Scrape brand
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
 | `url` (`url`) | string | Required | Absolute HTTP or HTTPS URL of the page to process. |
-| `timeout` (`timeout`) | integer | `300` | Maximum seconds to wait for the scrape, from 1 to 330. The HTTP request allows 30 additional seconds. |
+| `timeout` (`timeout`) | integer | Omitted | Maximum seconds to wait for the scrape, from 1 to 330. The HTTP request allows 30 additional seconds. |
 | `warm_start` (`warmStart`) | boolean | `false` | Whether to open the site's home page first to warm the session before loading the target URL. |
 | `geo_code` (`geoCode`) | string | Omitted | Two-letter country code to load the page from, sent in lowercase. |
 
@@ -193,9 +195,10 @@ base64 PNG `screenshot` of the full page and the page `html`.
 {"url": "https://example.com", "timeout": 120, "warm_start": true, "geo_code": "gb"}
 ```
 
-The request sends `action=brand-scraping`, `url`, and `bundle=none`, followed by
-`timeout` and `warmStart`, and `geoCode` only when set. The HTTP request allows
-`timeout` plus 30 seconds. Other page controls are not accepted. Brand details are
+The request sends `action=brand-scraping`, `url`, and `bundle=none`, then
+`timeout` only when set, `warmStart`, and `geoCode` only when set. The HTTP request
+allows `timeout` plus 30 seconds, or 330 seconds when `timeout` is omitted. Other
+page controls are not accepted. Brand details are
 at `data.data.brand` in the response envelope.
 
 ### Scrape JSON
@@ -246,7 +249,7 @@ above is equivalent to:
 ```bash
 curl --get 'https://api.mrscraper.com/' \
   --data-urlencode 'url=https://example.com' \
-  --data 'screenshot=full&browserRendering=true&timeout=120' \
+  --data 'screenshot=full&html=false&markdown=false&browserRendering=true&timeout=120' \
   --data-urlencode 'waitForSelector=body' \
   --data 'saveResult=true&maxAge=0' \
   --header "Authorization: Bearer ${MRSCRAPER_API_TOKEN}" \
@@ -286,20 +289,22 @@ Version 4.1.0 keeps the seven tool names and aligns their parameters with the
 Scraper API reference. Update saved prompts and automations, then start a new
 Hermes session to refresh tool schemas.
 
-- Removed: `super`, `wait_until`, `proxy_country`, `proxy`, and `return_cookie`
-  on the page tools, `html` on Scrape Markdown, and `screenshot`, `html`,
-  `markdown`, and `warm_start` on Get screenshot. Get screenshot always captures
-  the full page. Removed options are rejected with an error that lists the
-  supported options.
-- New: `max_age` and `token_cap` on the page tools, `action` on Scrape HTML and
+- Removed: `super`, `wait_until`, `proxy_country`, `proxy`, `return_cookie`,
+  `save_result`, and `token_cap` on the page tools, `html` on Scrape Markdown,
+  and `screenshot`, `html`, `markdown`, and `warm_start` on Get screenshot. Get
+  screenshot always captures the full page. Page results are always saved to the
+  MrScraper dashboard, and `tokenCap` is never sent. Removed options are rejected
+  with an error that lists the supported options.
+- New: `max_age` on the page tools, `action` on Scrape HTML and
   Scrape Markdown, and `screenshot` on Scrape HTML (`false`, `full`, `top`, or a
   custom viewport; setting one also sends `browserRendering=true`). Scrape JSON
   now accepts `warm_start`, `block_resources`, and `wait_for_selector`.
 - `browser_rendering` is omitted unless set, so the API decides whether to use a
   browser; `true` always renders and `false` never does.
-- Scrape brand now accepts `timeout`, `warm_start`, and `geo_code`; its HTTP
-  deadline is `timeout` plus 30 seconds instead of a fixed 120.
-- Changed defaults: `save_result` is `true`, Scrape JSON's `html` is `true`,
+- Scrape brand now accepts `timeout` and `geo_code` (sent only when set) and
+  `warm_start`; its HTTP deadline is `timeout` plus 30 seconds (330 without a
+  timeout) instead of a fixed 120.
+- Changed defaults: Scrape JSON's `html` is `true`,
   `timeout` accepts up to 330 seconds, and `geo_code` and Web search's `country`
   are omitted unless set.
 

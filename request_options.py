@@ -14,6 +14,7 @@ MAX_GET_URL_LENGTH = 8000
 TRANSPORT_GRACE_SECONDS = 30
 SEARCH_TIMEOUT = 120
 STATUS_TIMEOUT = 600
+DEFAULT_TIMEOUT = 300
 MAX_TIMEOUT = 330
 MAX_SELECTOR_LENGTH = 500
 MAX_CACHE_AGE_MS = 604_800_000
@@ -21,7 +22,7 @@ SCREENSHOT_PATTERN = r"^(false|full|top|[0-9]{3,4}x[0-9]{3,4}(-[0-9]{2,3})?)$"
 _VIEWPORT = re.compile(r"^(\d{3,4})x(\d{3,4})(?:-(\d{2,3}))?$")
 
 _LOADING = ("browser_rendering", "timeout", "warm_start", "block_resources", "wait_for_selector")
-_CACHE = ("geo_code", "save_result", "max_age", "token_cap", "max_retries")
+_CACHE = ("geo_code", "max_age", "max_retries")
 SERVICE_OPTIONS: dict[str, tuple[str, ...]] = {
     "status": (),
     "scrape_html": ("url", *_LOADING, "action", *_CACHE, "screenshot"),
@@ -138,7 +139,7 @@ def _shared(args: dict[str, Any], *, loading: bool, action: bool) -> dict[str, A
     fields: dict[str, Any] = {}
     if loading:
         fields["browserRendering"] = _optional_boolean(args, "browser_rendering")
-    fields["timeout"] = _integer(args, "timeout", 300, 1, MAX_TIMEOUT)
+    fields["timeout"] = _integer(args, "timeout", DEFAULT_TIMEOUT, 1, MAX_TIMEOUT)
     if loading:
         fields["warmStart"] = _boolean(args, "warm_start", False)
         fields["blockResources"] = _boolean(args, "block_resources", False)
@@ -146,9 +147,9 @@ def _shared(args: dict[str, Any], *, loading: bool, action: bool) -> dict[str, A
     if action:
         fields["action"] = _optional_text(args, "action")
     fields["geoCode"] = _country(args, "geo_code")
-    fields["saveResult"] = _boolean(args, "save_result", True)
+    # Results are always saved to the dashboard; saveResult is not an option.
+    fields["saveResult"] = True
     fields["maxAge"] = _integer(args, "max_age", 0, 0, MAX_CACHE_AGE_MS)
-    fields["tokenCap"] = _integer(args, "token_cap", None, 1)
     fields["maxRetries"] = _integer(args, "max_retries", None, 0)
     return fields
 
@@ -176,13 +177,16 @@ def build_page_request(service: str, args: dict[str, Any]) -> tuple[dict[str, st
         if capture is not False:
             # A screenshot needs a rendered page, so it always sends browserRendering=true.
             shared["browserRendering"] = True
-        params = {"url": url, "html": True, **shared, "screenshot": capture}
+        params = {"url": url, "html": True, "markdown": False, **shared, "screenshot": capture}
     elif service == "scrape_markdown":
-        params = {"url": url, "markdown": True, **_shared(args, loading=True, action=True)}
+        params = {
+            "url": url, "markdown": True, "html": False, "screenshot": False,
+            **_shared(args, loading=True, action=True),
+        }
     elif service == "get_screenshot":
         params = {
-            "url": url, "screenshot": "full", "browserRendering": True,
-            **_shared(args, loading=False, action=False),
+            "url": url, "screenshot": "full", "html": False, "markdown": False,
+            "browserRendering": True, **_shared(args, loading=False, action=False),
         }
     else:
         raise ValueError(f"Unsupported page service: {service}")
@@ -218,17 +222,18 @@ def build_json_request(
 
 
 def build_brand_request(args: dict[str, Any]) -> tuple[dict[str, str], int]:
-    """Scrape brand sends action, url, and bundle, then timeout, warmStart, and geoCode if set."""
+    """Scrape brand sends action, url, and bundle, then timeout if set, warmStart, and geoCode if set."""
     check_options("scrape_brand", args)
+    timeout = _integer(args, "timeout", None, 1, MAX_TIMEOUT)
     params = _compact({
         "action": "brand-scraping",
         "url": _page_url(args),
         "bundle": "none",
-        "timeout": _integer(args, "timeout", 300, 1, MAX_TIMEOUT),
+        "timeout": timeout,
         "warmStart": _boolean(args, "warm_start", False),
         "geoCode": _country(args, "geo_code"),
     })
-    return encode(params), params["timeout"] + TRANSPORT_GRACE_SECONDS
+    return encode(params), (DEFAULT_TIMEOUT if timeout is None else timeout) + TRANSPORT_GRACE_SECONDS
 
 
 def build_search_request(args: dict[str, Any]) -> tuple[dict[str, str], int]:

@@ -77,14 +77,10 @@ ACTION = {"type": "string",
                          "useful for separating analytics per domain."}
 CACHE = {
     "geo_code": _country("Two-letter country code to load the page from, sent in lowercase."),
-    "save_result": _boolean("Whether to save the result to the dashboard Result tab.", True),
     "max_age": {"type": "integer", "minimum": 0, "maximum": MAX_CACHE_AGE_MS, "default": 0,
                 "description": "Return a cached result of the same request when it is newer "
                                "than the selected age. A cached result costs the same tokens "
                                "as the original scrape."},
-    "token_cap": {"type": "integer", "minimum": 1,
-                  "description": "Maximum total tokens the scrape and its retries can use, as "
-                                 "a positive integer. Omit this parameter for no limit."},
     "max_retries": {"type": "integer", "minimum": 0,
                     "description": "Maximum number of retries, as a nonnegative integer. "
                                    "Omit this parameter for no limit."},
@@ -123,7 +119,9 @@ SERVICES = (
      ["url"]),
     ("mrscraper_scrape_brand", "scrape_brand",
      "Extract a website's colors, typography, logos, and social links as JSON.",
-     {"url": URL, "timeout": TIMEOUT, "warm_start": WARM_START, "geo_code": CACHE["geo_code"]},
+     # Scrape brand has no default timeout: it is sent only when set.
+     {"url": URL, "timeout": {key: value for key, value in TIMEOUT.items() if key != "default"},
+      "warm_start": WARM_START, "geo_code": CACHE["geo_code"]},
      ["url"]),
     ("mrscraper_scrape_json", "scrape_json",
      "Extract structured JSON from a page using a natural-language prompt. "
