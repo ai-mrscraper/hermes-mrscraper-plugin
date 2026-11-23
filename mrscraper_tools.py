@@ -123,7 +123,8 @@ SERVICES = (
      ["url"]),
     ("mrscraper_scrape_brand", "scrape_brand",
      "Extract a website's colors, typography, logos, and social links as JSON.",
-     {"url": URL}, ["url"]),
+     {"url": URL, "timeout": TIMEOUT, "warm_start": WARM_START, "geo_code": CACHE["geo_code"]},
+     ["url"]),
     ("mrscraper_scrape_json", "scrape_json",
      "Extract structured JSON from a page using a natural-language prompt. "
      "Append Json Schema: and a JSON schema to shape the output.",
