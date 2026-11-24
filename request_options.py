@@ -12,7 +12,7 @@ from tools.website_policy import check_website_access
 DEFAULT_JSON_PROMPT = "Extract all data as complete as possible."
 MAX_GET_URL_LENGTH = 8000
 TRANSPORT_GRACE_SECONDS = 30
-SEARCH_TIMEOUT = 120
+BRAND_AND_SEARCH_TIMEOUT = 120
 STATUS_TIMEOUT = 600
 DEFAULT_TIMEOUT = 300
 MAX_TIMEOUT = 330
@@ -28,7 +28,7 @@ SERVICE_OPTIONS: dict[str, tuple[str, ...]] = {
     "scrape_html": ("url", *_LOADING, "action", *_CACHE, "screenshot"),
     "scrape_markdown": ("url", *_LOADING, "action", *_CACHE),
     "get_screenshot": ("url", "timeout", "wait_for_selector", *_CACHE),
-    "scrape_brand": ("url", "timeout", "warm_start", "geo_code"),
+    "scrape_brand": ("url",),
     "scrape_json": ("url", "prompt", "html", *_LOADING, *_CACHE, "screenshot"),
     "web_search": ("query", "country", "num_results"),
 }
@@ -222,18 +222,9 @@ def build_json_request(
 
 
 def build_brand_request(args: dict[str, Any]) -> tuple[dict[str, str], int]:
-    """Scrape brand sends action, url, and bundle, then timeout if set, warmStart, and geoCode if set."""
     check_options("scrape_brand", args)
-    timeout = _integer(args, "timeout", None, 1, MAX_TIMEOUT)
-    params = _compact({
-        "action": "brand-scraping",
-        "url": _page_url(args),
-        "bundle": "none",
-        "timeout": timeout,
-        "warmStart": _boolean(args, "warm_start", False),
-        "geoCode": _country(args, "geo_code"),
-    })
-    return encode(params), (DEFAULT_TIMEOUT if timeout is None else timeout) + TRANSPORT_GRACE_SECONDS
+    params = {"action": "brand-scraping", "url": _page_url(args), "bundle": "none"}
+    return encode(params), BRAND_AND_SEARCH_TIMEOUT
 
 
 def build_search_request(args: dict[str, Any]) -> tuple[dict[str, str], int]:
@@ -247,4 +238,4 @@ def build_search_request(args: dict[str, Any]) -> tuple[dict[str, str], int]:
         "country": _country(args, "country"),
         "numResults": _integer(args, "num_results", 10, 10, 100),
     })
-    return encode(params), SEARCH_TIMEOUT
+    return encode(params), BRAND_AND_SEARCH_TIMEOUT

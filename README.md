@@ -187,19 +187,10 @@ and the page `html`, which the API includes even though `html=false` is sent.
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
 | `url` (`url`) | string | Required | Absolute HTTP or HTTPS URL of the page to process. |
-| `timeout` (`timeout`) | integer | Omitted | Maximum seconds to wait for the scrape, from 1 to 330. The HTTP request allows 30 additional seconds. |
-| `warm_start` (`warmStart`) | boolean | `false` | Whether to open the site's home page first to warm the session before loading the target URL. |
-| `geo_code` (`geoCode`) | string | Omitted | Two-letter country code to load the page from, sent in lowercase. |
 
-```json
-{"url": "https://example.com", "timeout": 120, "warm_start": true, "geo_code": "gb"}
-```
-
-The request sends `action=brand-scraping`, `url`, and `bundle=none`, then
-`timeout` only when set, `warmStart`, and `geoCode` only when set. The HTTP request
-allows `timeout` plus 30 seconds, or 330 seconds when `timeout` is omitted. Other
-page controls are not accepted. Brand details are
-at `data.data.brand` in the response envelope.
+The request sends `action=brand-scraping` and `bundle=none` with a fixed
+120-second HTTP deadline; page controls are not accepted. Brand details are at
+`data.data.brand` in the response envelope.
 
 ### Scrape JSON
 
@@ -301,9 +292,6 @@ Hermes session to refresh tool schemas.
   now accepts `warm_start`, `block_resources`, and `wait_for_selector`.
 - `browser_rendering` is omitted unless set, so the API decides whether to use a
   browser; `true` always renders and `false` never does.
-- Scrape brand now accepts `timeout` and `geo_code` (sent only when set) and
-  `warm_start`; its HTTP deadline is `timeout` plus 30 seconds (330 without a
-  timeout) instead of a fixed 120.
 - Changed defaults: Scrape JSON's `html` is `true`,
   `timeout` accepts up to 330 seconds, and `geo_code` and Web search's `country`
   are omitted unless set.

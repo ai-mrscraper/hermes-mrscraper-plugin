@@ -199,13 +199,12 @@ def test_seven_tools_register_with_standard_schemas(installed_plugin):
     assert list(params["mrscraper_scrape_html"]) == ["url", *loading, "action", *cache, "screenshot"]
     assert list(params["mrscraper_scrape_markdown"]) == ["url", *loading, "action", *cache]
     assert list(params["mrscraper_get_screenshot"]) == ["url", "timeout", "wait_for_selector", *cache]
-    assert list(params["mrscraper_scrape_brand"]) == ["url", "timeout", "warm_start", "geo_code"]
+    assert list(params["mrscraper_scrape_brand"]) == ["url"]
     assert list(params["mrscraper_scrape_json"]) == ["url", "prompt", "html", *loading, *cache, "screenshot"]
     assert list(params["mrscraper_web_search"]) == ["query", "country", "num_results"]
     for name in TOOL_NAMES:
         assert not set(REMOVED) & set(params[name]), name
-    for name in ("mrscraper_scrape_html", "mrscraper_scrape_markdown", "mrscraper_scrape_json",
-                 "mrscraper_scrape_brand"):
+    for name in ("mrscraper_scrape_html", "mrscraper_scrape_markdown", "mrscraper_scrape_json"):
         assert params[name]["warm_start"] == {
             "type": "boolean", "description": STANDARD["warm_start"], "default": False,
         }
@@ -213,11 +212,6 @@ def test_seven_tools_register_with_standard_schemas(installed_plugin):
         assert params[name]["browser_rendering"] == {
             "type": "boolean", "description": STANDARD["browser_rendering"],
         }
-    # Scrape brand sends timeout only when it is set, so it has no default.
-    assert params["mrscraper_scrape_brand"]["timeout"] == {
-        "type": "integer", "minimum": 1, "maximum": 330, "description": STANDARD["timeout"],
-    }
-    assert "default" not in params["mrscraper_scrape_brand"]["geo_code"]
     for name in ("mrscraper_scrape_html", "mrscraper_scrape_markdown",
                  "mrscraper_get_screenshot", "mrscraper_scrape_json"):
         assert params[name]["url"]["description"] == STANDARD["url"]
@@ -358,21 +352,11 @@ def test_status_brand_json_and_search_match_cli_wire_contract(installed_plugin):
     assert not ({"set-cookie", "authorization"} & {key.lower() for key in status["headers"]})
 
     brand = _call(plugin, "mrscraper_scrape_brand", {"url": PAGE_URL})
-    # Without a timeout, brand sends warmStart only and allows 300 + 30 seconds.
     assert list(plugin.requests[-1]["flat"].items()) == [
         ("action", "brand-scraping"), ("url", PAGE_URL), ("bundle", "none"),
-        ("warmStart", "false"),
     ]
-    assert plugin.requests[-1]["method"] == "GET" and plugin.timeouts[-1] == 300 + 30
+    assert plugin.requests[-1]["method"] == "GET" and plugin.timeouts[-1] == 120
     assert brand["data"]["data"]["brand"]["name"] == "Fixture"
-    _call(plugin, "mrscraper_scrape_brand", {
-        "url": PAGE_URL, "timeout": 120, "warm_start": True, "geo_code": "GB",
-    })
-    assert list(plugin.requests[-1]["flat"].items()) == [
-        ("action", "brand-scraping"), ("url", PAGE_URL), ("bundle", "none"),
-        ("timeout", "120"), ("warmStart", "true"), ("geoCode", "gb"),
-    ]
-    assert plugin.timeouts[-1] == 120 + 30
 
     extracted = _call(plugin, "mrscraper_scrape_json", {"url": PAGE_URL})
     assert plugin.requests[-1]["method"] == "GET" and plugin.requests[-1]["body"] is None
@@ -507,6 +491,8 @@ def test_standard_web_provider_uses_search_and_page_services(installed_plugin):
     ("mrscraper_scrape_json", {"url": PAGE_URL, "action": "flow"}),
     ("mrscraper_scrape_json", {"url": PAGE_URL, "screenshot": "top"}),
     ("mrscraper_scrape_json", {"url": PAGE_URL, "html": "true"}),
+    ("mrscraper_scrape_brand", {"url": PAGE_URL, "timeout": 60}),
+    ("mrscraper_scrape_brand", {"url": PAGE_URL, "warm_start": False}),
     ("mrscraper_scrape_brand", {"url": PAGE_URL, "timeout": 0}),
     ("mrscraper_scrape_brand", {"url": PAGE_URL, "timeout": 331}),
     ("mrscraper_scrape_brand", {"url": PAGE_URL, "warm_start": "yes"}),
