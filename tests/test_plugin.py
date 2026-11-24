@@ -44,6 +44,7 @@ STANDARD = {
     "warm_start": "Whether to open the site's home page first to warm the session before loading the target URL.",
     "browser_rendering": "Whether to load the page in a browser: true always does and false never does. Omit it to load the page without a browser first and switch to a browser automatically if the request is blocked.",
     "max_age": "Return a cached result of the same request when it is newer than the selected age. A cached result costs the same tokens as the original scrape.",
+    "screenshot_area": "Screenshot area to capture: full for the entire scroll height, top for the first viewport, or a WIDTHxHEIGHT viewport from 100 to 3840 pixels with an optional -ZOOM percent from 25 to 300, such as 1280x800 or 1920x1080-75.",
     "screenshot": "Screenshot to capture with the HTML: false for none, full for the entire page, top for the first viewport, or a WIDTHxHEIGHT viewport from 100 to 3840 pixels with an optional -ZOOM percent from 25 to 300, such as 1280x800 or 1920x1080-75. Setting a screenshot also sends browserRendering=true.",
     "query": "Search query text, trimmed before sending, containing 1 to 1000 characters.",
 }
@@ -198,7 +199,13 @@ def test_seven_tools_register_with_standard_schemas(installed_plugin):
     assert params["mrscraper_status"] == {}
     assert list(params["mrscraper_scrape_html"]) == ["url", *loading, "action", *cache, "screenshot"]
     assert list(params["mrscraper_scrape_markdown"]) == ["url", *loading, "action", *cache]
-    assert list(params["mrscraper_get_screenshot"]) == ["url", "timeout", "wait_for_selector", *cache]
+    assert list(params["mrscraper_get_screenshot"]) == [
+        "url", "screenshot", "timeout", "wait_for_selector", *cache,
+    ]
+    assert params["mrscraper_get_screenshot"]["screenshot"] == {
+        "type": "string", "pattern": "^(full|top|[0-9]{3,4}x[0-9]{3,4}(-[0-9]{2,3})?)$",
+        "default": "full", "description": STANDARD["screenshot_area"],
+    }
     assert list(params["mrscraper_scrape_brand"]) == ["url"]
     assert list(params["mrscraper_scrape_json"]) == ["url", "prompt", "html", *loading, *cache, "screenshot"]
     assert list(params["mrscraper_web_search"]) == ["query", "country", "num_results"]
@@ -237,7 +244,8 @@ def test_seven_tools_register_with_standard_schemas(installed_plugin):
     assert "default" not in params["mrscraper_web_search"]["country"]
     assert params["mrscraper_web_search"]["query"]["description"] == STANDARD["query"]
     assert schemas["mrscraper_get_screenshot"]["description"] == (
-        "Capture a base64 PNG screenshot of the full page. Browser rendering is always enabled."
+        "Capture a base64 PNG screenshot of the full page, the first viewport, or a custom "
+        "viewport. Browser rendering is always enabled."
     )
     assert schemas["mrscraper_scrape_markdown"]["description"] == (
         "Retrieve a page as clean Markdown. Browser rendering is optional."
@@ -316,15 +324,21 @@ def test_page_tools_match_cli_wire_contract(installed_plugin):
         ("maxAge", "0"),
     ]
     _call(plugin, "mrscraper_get_screenshot", {
-        "url": PAGE_URL, "timeout": 60, "wait_for_selector": "#results", "geo_code": "DE",
-        "max_retries": 1,
+        "url": PAGE_URL, "screenshot": "1280x800", "timeout": 60, "wait_for_selector": "#results",
+        "geo_code": "DE", "max_retries": 1,
     })
     assert list(plugin.requests[-1]["flat"].items()) == [
-        ("url", PAGE_URL), ("screenshot", "full"), ("html", "false"), ("markdown", "false"),
+        ("url", PAGE_URL), ("screenshot", "1280x800"), ("html", "false"), ("markdown", "false"),
         ("browserRendering", "true"), ("timeout", "60"), ("waitForSelector", "#results"),
         ("geoCode", "de"), ("saveResult", "true"), ("maxAge", "0"), ("maxRetries", "1"),
     ]
     assert plugin.timeouts[-1] == 60 + 30
+    for area in ("full", "top", "1920x1080-75", "3840x3840-300", "100x100-25"):
+        _call(plugin, "mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": area})
+        assert list(plugin.requests[-1]["flat"].items())[:5] == [
+            ("url", PAGE_URL), ("screenshot", area), ("html", "false"), ("markdown", "false"),
+            ("browserRendering", "true"),
+        ]
 
     for request in plugin.requests:
         assert "token" not in request["query"]
@@ -482,7 +496,16 @@ def test_standard_web_provider_uses_search_and_page_services(installed_plugin):
     )],
     ("mrscraper_scrape_markdown", {"url": PAGE_URL, "html": True}),
     ("mrscraper_scrape_markdown", {"url": PAGE_URL, "screenshot": "top"}),
-    ("mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": "top"}),
+    *[(name, {"url": PAGE_URL, "screenshot": value})
+      for name in ("mrscraper_scrape_html", "mrscraper_get_screenshot")
+      for value in ("1280x800\n", " 1280x800", "1280x800 ", "\u0661\u0662\u0668\u0660x800",
+                    "1280x800-75\n")],
+    ("mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": False}),
+    ("mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": True}),
+    ("mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": "false"}),
+    ("mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": "middle"}),
+    ("mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": "99x800"}),
+    ("mrscraper_get_screenshot", {"url": PAGE_URL, "screenshot": "1280x800-301"}),
     ("mrscraper_get_screenshot", {"url": PAGE_URL, "browser_rendering": False}),
     ("mrscraper_get_screenshot", {"url": PAGE_URL, "warm_start": True}),
     ("mrscraper_get_screenshot", {"url": PAGE_URL, "html": False}),

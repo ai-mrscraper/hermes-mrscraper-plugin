@@ -74,7 +74,7 @@ alone does not establish that the expected page was retrieved.
 | `mrscraper_status` | Return the raw account status API response without summarizing, redacting body fields, or adding calculated fields. | `GET https://api.app.mrscraper.com/api/v1/subscription-accounts` |
 | `mrscraper_scrape_html` | Retrieve the raw HTML of a page. Browser rendering is optional. | `GET https://api.mrscraper.com/` with `html=true` |
 | `mrscraper_scrape_markdown` | Retrieve a page as clean Markdown. Browser rendering is optional. | `GET https://api.mrscraper.com/` with `markdown=true` |
-| `mrscraper_get_screenshot` | Capture a base64 PNG screenshot of the full page. Browser rendering is always enabled. | `GET https://api.mrscraper.com/` with `screenshot=full` and `browserRendering=true` |
+| `mrscraper_get_screenshot` | Capture a base64 PNG screenshot of the full page, the first viewport, or a custom viewport. Browser rendering is always enabled. | `GET https://api.mrscraper.com/` with the `screenshot` area and `browserRendering=true` |
 | `mrscraper_scrape_brand` | Extract a website's colors, typography, logos, and social links as JSON. | `GET https://api.mrscraper.com/` with `action=brand-scraping` |
 | `mrscraper_scrape_json` | Extract structured JSON from a page using a natural-language prompt. Append Json Schema: and a JSON schema to shape the output. | `GET https://api.mrscraper.com/` with `agent=general` (POST above 8,000 URL characters) |
 | `mrscraper_web_search` | Search the web and return ranked results with titles, URLs, descriptions, and sources. | `GET https://api.mrscraper.com/` with `action=websearch` |
@@ -171,16 +171,21 @@ response body is Markdown text.
 
 ### Get screenshot
 
-Page controls only.
+Page controls, plus:
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `screenshot` (`screenshot`) | string | `"full"` | Screenshot area to capture: full for the entire scroll height, top for the first viewport, or a WIDTHxHEIGHT viewport from 100 to 3840 pixels with an optional -ZOOM percent from 25 to 300, such as 1280x800 or 1920x1080-75. |
 
 ```json
-{"url": "https://example.com", "wait_for_selector": "body", "timeout": 120}
+{"url": "https://example.com", "screenshot": "top", "timeout": 120}
 ```
 
-The request sends `screenshot=full`, `html=false`, `markdown=false`, and
-`browserRendering=true`; the screenshot area, outputs, and browser rendering are not
-parameters. The response body contains a base64 PNG `screenshot` of the full page
-and the page `html`, which the API includes even though `html=false` is sent.
+The request sends the `screenshot` area followed by `html=false`, `markdown=false`,
+and `browserRendering=true`; the outputs and browser rendering are not parameters.
+Any other `screenshot` value, including `false`, is rejected before a request is
+made. The response body contains a base64 PNG `screenshot` and the page `html`,
+which the API includes even though `html=false` is sent.
 
 ### Scrape brand
 
@@ -240,8 +245,7 @@ above is equivalent to:
 ```bash
 curl --get 'https://api.mrscraper.com/' \
   --data-urlencode 'url=https://example.com' \
-  --data 'screenshot=full&html=false&markdown=false&browserRendering=true&timeout=120' \
-  --data-urlencode 'waitForSelector=body' \
+  --data 'screenshot=top&html=false&markdown=false&browserRendering=true&timeout=120' \
   --data 'saveResult=true&maxAge=0' \
   --header "Authorization: Bearer ${MRSCRAPER_API_TOKEN}" \
   --header "x-api-token: ${MRSCRAPER_API_TOKEN}" \
@@ -282,10 +286,12 @@ Hermes session to refresh tool schemas.
 
 - Removed: `super`, `wait_until`, `proxy_country`, `proxy`, `return_cookie`,
   `save_result`, and `token_cap` on the page tools, `html` on Scrape Markdown,
-  and `screenshot`, `html`, `markdown`, and `warm_start` on Get screenshot. Get
-  screenshot always captures the full page. Page results are always saved to the
-  MrScraper dashboard, and `tokenCap` is never sent. Removed options are rejected
+  and `html`, `markdown`, and `warm_start` on Get screenshot. Page results are
+  always saved to the MrScraper dashboard, and `tokenCap` is never sent. Removed options are rejected
   with an error that lists the supported options.
+- Get screenshot's `screenshot` still defaults to `full` and accepts `top`, and now
+  also accepts a custom viewport such as `1280x800` or `1920x1080-75`; any other
+  value, including `false`, is rejected.
 - New: `max_age` on the page tools, `action` on Scrape HTML and
   Scrape Markdown, and `screenshot` on Scrape HTML (`false`, `full`, `top`, or a
   custom viewport; setting one also sends `browserRendering=true`). Scrape JSON

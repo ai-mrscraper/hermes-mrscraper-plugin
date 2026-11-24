@@ -16,6 +16,7 @@ from .request_options import (
     MAX_CACHE_AGE_MS,
     MAX_SELECTOR_LENGTH,
     MAX_TIMEOUT,
+    SCREENSHOT_AREA_PATTERN,
     SCREENSHOT_PATTERN,
 )
 from tools.registry import tool_error, tool_result
@@ -99,6 +100,12 @@ SCREENSHOT_CAPTURE = {
                    "3840 pixels with an optional -ZOOM percent from 25 to 300, such as 1280x800 "
                    "or 1920x1080-75. Setting a screenshot also sends browserRendering=true.",
 }
+SCREENSHOT_AREA = {
+    "type": "string", "pattern": SCREENSHOT_AREA_PATTERN, "default": "full",
+    "description": "Screenshot area to capture: full for the entire scroll height, top for the "
+                   "first viewport, or a WIDTHxHEIGHT viewport from 100 to 3840 pixels with an "
+                   "optional -ZOOM percent from 25 to 300, such as 1280x800 or 1920x1080-75.",
+}
 
 SERVICES = (
     ("mrscraper_status", "status",
@@ -114,8 +121,10 @@ SERVICES = (
      {"url": URL, **LOADING, "action": ACTION, **CACHE},
      ["url"]),
     ("mrscraper_get_screenshot", "get_screenshot",
-     "Capture a base64 PNG screenshot of the full page. Browser rendering is always enabled.",
-     {"url": URL, "timeout": TIMEOUT, "wait_for_selector": WAIT_FOR_SELECTOR, **CACHE},
+     "Capture a base64 PNG screenshot of the full page, the first viewport, or a custom "
+     "viewport. Browser rendering is always enabled.",
+     {"url": URL, "screenshot": SCREENSHOT_AREA, "timeout": TIMEOUT,
+      "wait_for_selector": WAIT_FOR_SELECTOR, **CACHE},
      ["url"]),
     ("mrscraper_scrape_brand", "scrape_brand",
      "Extract a website's colors, typography, logos, and social links as JSON.",

@@ -19,7 +19,14 @@ MAX_TIMEOUT = 330
 MAX_SELECTOR_LENGTH = 500
 MAX_CACHE_AGE_MS = 604_800_000
 SCREENSHOT_PATTERN = r"^(false|full|top|[0-9]{3,4}x[0-9]{3,4}(-[0-9]{2,3})?)$"
-_VIEWPORT = re.compile(r"^(\d{3,4})x(\d{3,4})(?:-(\d{2,3}))?$")
+SCREENSHOT_AREA_PATTERN = r"^(full|top|[0-9]{3,4}x[0-9]{3,4}(-[0-9]{2,3})?)$"
+_AREA_HINT = (
+    "WIDTHxHEIGHT from 100 to 3840 pixels with an optional -ZOOM from 25 to 300, "
+    "such as 1280x800 or 1920x1080-75"
+)
+# ASCII digits only, matched against the whole value (fullmatch) so a trailing newline or
+# non-ASCII digits are rejected.
+_VIEWPORT = re.compile(r"([0-9]{3,4})x([0-9]{3,4})(?:-([0-9]{2,3}))?")
 
 _LOADING = ("browser_rendering", "timeout", "warm_start", "block_resources", "wait_for_selector")
 _CACHE = ("geo_code", "max_age", "max_retries")
@@ -27,7 +34,7 @@ SERVICE_OPTIONS: dict[str, tuple[str, ...]] = {
     "status": (),
     "scrape_html": ("url", *_LOADING, "action", *_CACHE, "screenshot"),
     "scrape_markdown": ("url", *_LOADING, "action", *_CACHE),
-    "get_screenshot": ("url", "timeout", "wait_for_selector", *_CACHE),
+    "get_screenshot": ("url", "screenshot", "timeout", "wait_for_selector", *_CACHE),
     "scrape_brand": ("url",),
     "scrape_json": ("url", "prompt", "html", *_LOADING, *_CACHE, "screenshot"),
     "web_search": ("query", "country", "num_results"),
@@ -102,23 +109,36 @@ def _country(args: dict[str, Any], name: str) -> str | None:
     return value.lower()
 
 
+def _is_screenshot_area(value: Any) -> bool:
+    """True for full, top, or a WIDTHxHEIGHT viewport with an optional -ZOOM percent."""
+    if value in ("full", "top"):
+        return True
+    match = _VIEWPORT.fullmatch(value) if isinstance(value, str) else None
+    if not match:
+        return False
+    width, height = int(match[1]), int(match[2])
+    zoom = 100 if match[3] is None else int(match[3])
+    return 100 <= width <= 3840 and 100 <= height <= 3840 and 25 <= zoom <= 300
+
+
 def _screenshot_capture(args: dict[str, Any]) -> str | bool:
-    """Accept false, full, top, or WIDTHxHEIGHT with an optional -ZOOM."""
+    """Scrape HTML: accept false, full, top, or WIDTHxHEIGHT with an optional -ZOOM."""
     value = args.get("screenshot")
     if value is None or value is False or value == "false":
         return False
-    if value in ("full", "top"):
+    if _is_screenshot_area(value):
         return value
-    match = _VIEWPORT.match(value) if isinstance(value, str) else None
-    if match:
-        width, height = int(match[1]), int(match[2])
-        zoom = 100 if match[3] is None else int(match[3])
-        if 100 <= width <= 3840 and 100 <= height <= 3840 and 25 <= zoom <= 300:
-            return value
-    _error(
-        "screenshot must be false, full, top, or WIDTHxHEIGHT from 100 to 3840 pixels with "
-        "an optional -ZOOM from 25 to 300, such as 1280x800 or 1920x1080-75."
-    )
+    _error(f"screenshot must be false, full, top, or {_AREA_HINT}.")
+
+
+def _screenshot_area(args: dict[str, Any]) -> str:
+    """Get screenshot: accept full (the default), top, or WIDTHxHEIGHT with an optional -ZOOM."""
+    value = args.get("screenshot")
+    if value is None:
+        return "full"
+    if _is_screenshot_area(value):
+        return value
+    _error(f"screenshot must be full, top, or {_AREA_HINT}.")
 
 
 def _page_url(args: dict[str, Any]) -> str:
@@ -185,7 +205,7 @@ def build_page_request(service: str, args: dict[str, Any]) -> tuple[dict[str, st
         }
     elif service == "get_screenshot":
         params = {
-            "url": url, "screenshot": "full", "html": False, "markdown": False,
+            "url": url, "screenshot": _screenshot_area(args), "html": False, "markdown": False,
             "browserRendering": True, **_shared(args, loading=False, action=False),
         }
     else:
