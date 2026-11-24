@@ -32,8 +32,8 @@ _LOADING = ("browser_rendering", "timeout", "warm_start", "block_resources", "wa
 _CACHE = ("geo_code", "max_age", "max_retries")
 SERVICE_OPTIONS: dict[str, tuple[str, ...]] = {
     "status": (),
-    "scrape_html": ("url", *_LOADING, "action", *_CACHE, "screenshot"),
-    "scrape_markdown": ("url", *_LOADING, "action", *_CACHE),
+    "scrape_html": ("url", *_LOADING, *_CACHE, "screenshot"),
+    "scrape_markdown": ("url", *_LOADING, *_CACHE),
     "get_screenshot": ("url", "screenshot", "timeout", "wait_for_selector", *_CACHE),
     "scrape_brand": ("url",),
     "scrape_json": ("url", "prompt", "html", *_LOADING, *_CACHE, "screenshot"),
@@ -154,7 +154,7 @@ def _page_url(args: dict[str, Any]) -> str:
     return url
 
 
-def _shared(args: dict[str, Any], *, loading: bool, action: bool) -> dict[str, Any]:
+def _shared(args: dict[str, Any], *, loading: bool) -> dict[str, Any]:
     """Validate the shared controls and return them in the documented request order."""
     fields: dict[str, Any] = {}
     if loading:
@@ -164,8 +164,6 @@ def _shared(args: dict[str, Any], *, loading: bool, action: bool) -> dict[str, A
         fields["warmStart"] = _boolean(args, "warm_start", False)
         fields["blockResources"] = _boolean(args, "block_resources", False)
     fields["waitForSelector"] = _selector(args)
-    if action:
-        fields["action"] = _optional_text(args, "action")
     fields["geoCode"] = _country(args, "geo_code")
     # Results are always saved to the dashboard; saveResult is not an option.
     fields["saveResult"] = True
@@ -192,7 +190,7 @@ def build_page_request(service: str, args: dict[str, Any]) -> tuple[dict[str, st
     check_options(service, args)
     url = _page_url(args)
     if service == "scrape_html":
-        shared = _shared(args, loading=True, action=True)
+        shared = _shared(args, loading=True)
         capture = _screenshot_capture(args)
         if capture is not False:
             # A screenshot needs a rendered page, so it always sends browserRendering=true.
@@ -201,12 +199,12 @@ def build_page_request(service: str, args: dict[str, Any]) -> tuple[dict[str, st
     elif service == "scrape_markdown":
         params = {
             "url": url, "markdown": True, "html": False, "screenshot": False,
-            **_shared(args, loading=True, action=True),
+            **_shared(args, loading=True),
         }
     elif service == "get_screenshot":
         params = {
             "url": url, "screenshot": _screenshot_area(args), "html": False, "markdown": False,
-            "browserRendering": True, **_shared(args, loading=False, action=False),
+            "browserRendering": True, **_shared(args, loading=False),
         }
     else:
         raise ValueError(f"Unsupported page service: {service}")
@@ -230,7 +228,7 @@ def build_json_request(
         "prompt": prompt,
         "agent": "general",
         "html": _boolean(args, "html", True),
-        **_shared(args, loading=True, action=False),
+        **_shared(args, loading=True),
         "screenshot": _boolean(args, "screenshot", False),
     })
     query = encode(params)

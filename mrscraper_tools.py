@@ -73,9 +73,6 @@ BLOCK_RESOURCES = _boolean(
 WAIT_FOR_SELECTOR = {"type": "string", "maxLength": MAX_SELECTOR_LENGTH,
                      "description": "CSS selector or text to wait for on the page before "
                                     "returning the result, up to 500 characters."}
-ACTION = {"type": "string",
-          "description": "Scraper action that routes the request or simply flags it, "
-                         "useful for separating analytics per domain."}
 CACHE = {
     "geo_code": _country("Two-letter country code to load the page from, sent in lowercase."),
     "max_age": {"type": "integer", "minimum": 0, "maximum": MAX_CACHE_AGE_MS, "default": 0,
@@ -114,11 +111,11 @@ SERVICES = (
      {}, []),
     ("mrscraper_scrape_html", "scrape_html",
      "Retrieve the raw HTML of a page. Browser rendering is optional.",
-     {"url": URL, **LOADING, "action": ACTION, **CACHE, "screenshot": SCREENSHOT_CAPTURE},
+     {"url": URL, **LOADING, **CACHE, "screenshot": SCREENSHOT_CAPTURE},
      ["url"]),
     ("mrscraper_scrape_markdown", "scrape_markdown",
      "Retrieve a page as clean Markdown. Browser rendering is optional.",
-     {"url": URL, **LOADING, "action": ACTION, **CACHE},
+     {"url": URL, **LOADING, **CACHE},
      ["url"]),
     ("mrscraper_get_screenshot", "get_screenshot",
      "Capture a base64 PNG screenshot of the full page, the first viewport, or a custom "

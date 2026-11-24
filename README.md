@@ -147,7 +147,6 @@ Page and loading controls, plus:
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `action` (`action`) | string | Omitted | Scraper action that routes the request or simply flags it, useful for separating analytics per domain. |
 | `screenshot` (`screenshot`) | string | `"false"` | Screenshot to capture with the HTML: false for none, full for the entire page, top for the first viewport, or a WIDTHxHEIGHT viewport from 100 to 3840 pixels with an optional -ZOOM percent from 25 to 300, such as 1280x800 or 1920x1080-75. Setting a screenshot also sends browserRendering=true. |
 
 ```json
@@ -155,14 +154,13 @@ Page and loading controls, plus:
 ```
 
 The request sends `html=true` and `markdown=false`. Any `screenshot` other than `false` also sends
-`browserRendering=true`, whatever `browser_rendering` is set to. An `action` must
-name a scraper flow configured for the target host. The response body is HTML
-text; with a screenshot, the API returns JSON containing `html` and a base64
+`browserRendering=true`, whatever `browser_rendering` is set to. The response body
+is HTML text; with a screenshot, the API returns JSON containing `html` and a base64
 `screenshot`.
 
 ### Scrape Markdown
 
-Page and loading controls, plus `action` (as in Scrape HTML).
+Page and loading controls.
 
 ```json
 {"url": "https://example.com", "warm_start": true, "max_age": 86400000}

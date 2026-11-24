@@ -36,7 +36,7 @@ SHARED_DEFAULTS = {"timeout": "300", "saveResult": "true", "maxAge": "0"}
 LOADING_DEFAULTS = {"warmStart": "false", "blockResources": "false"}
 REMOVED = (
     "super", "wait_until", "proxy_country", "proxy", "return_cookie", "markdown",
-    "save_result", "token_cap",
+    "save_result", "token_cap", "action",
 )
 STANDARD = {
     "url": "Absolute HTTP or HTTPS URL of the page to process.",
@@ -197,8 +197,8 @@ def test_seven_tools_register_with_standard_schemas(installed_plugin):
     loading = ["browser_rendering", "timeout", "warm_start", "block_resources", "wait_for_selector"]
     cache = ["geo_code", "max_age", "max_retries"]
     assert params["mrscraper_status"] == {}
-    assert list(params["mrscraper_scrape_html"]) == ["url", *loading, "action", *cache, "screenshot"]
-    assert list(params["mrscraper_scrape_markdown"]) == ["url", *loading, "action", *cache]
+    assert list(params["mrscraper_scrape_html"]) == ["url", *loading, *cache, "screenshot"]
+    assert list(params["mrscraper_scrape_markdown"]) == ["url", *loading, *cache]
     assert list(params["mrscraper_get_screenshot"]) == [
         "url", "screenshot", "timeout", "wait_for_selector", *cache,
     ]
@@ -269,14 +269,14 @@ def test_page_tools_match_cli_wire_contract(installed_plugin):
     target_url = PAGE_URL + "?q=a%2Bb&tag=café#section"
     _call(plugin, "mrscraper_scrape_html", {
         "url": target_url, "browser_rendering": False, "timeout": 330, "warm_start": True,
-        "block_resources": True, "wait_for_selector": " body ", "action": " product-flow ",
+        "block_resources": True, "wait_for_selector": " body ",
         "geo_code": "ID", "max_age": 3600000, "max_retries": 0, "screenshot": "1920x1080-75",
     })
     # A screenshot sends browserRendering=true even when browser_rendering is false.
     assert list(plugin.requests[-1]["flat"].items()) == [
         ("url", target_url), ("html", "true"), ("markdown", "false"),
         ("browserRendering", "true"), ("timeout", "330"), ("warmStart", "true"),
-        ("blockResources", "true"), ("waitForSelector", "body"), ("action", "product-flow"),
+        ("blockResources", "true"), ("waitForSelector", "body"),
         ("geoCode", "id"), ("saveResult", "true"), ("maxAge", "3600000"),
         ("maxRetries", "0"), ("screenshot", "1920x1080-75"),
     ]
@@ -307,12 +307,12 @@ def test_page_tools_match_cli_wire_contract(installed_plugin):
     }
     assert list(plugin.requests[-1]["flat"])[:4] == ["url", "markdown", "html", "screenshot"]
     _call(plugin, "mrscraper_scrape_markdown", {
-        "url": PAGE_URL, "browser_rendering": True, "action": "docs", "max_age": 86400000,
+        "url": PAGE_URL, "browser_rendering": True, "max_age": 86400000,
     })
     assert list(plugin.requests[-1]["flat"].items()) == [
         ("url", PAGE_URL), ("markdown", "true"), ("html", "false"), ("screenshot", "false"),
         ("browserRendering", "true"), ("timeout", "300"), ("warmStart", "false"),
-        ("blockResources", "false"), ("action", "docs"), ("saveResult", "true"),
+        ("blockResources", "false"), ("saveResult", "true"),
         ("maxAge", "86400000"),
     ]
 
@@ -482,7 +482,8 @@ def test_standard_web_provider_uses_search_and_page_services(installed_plugin):
     ("mrscraper_get_screenshot", {"url": PAGE_URL, "save_result": False}),
     ("mrscraper_scrape_json", {"url": PAGE_URL, "token_cap": 5}),
     ("mrscraper_scrape_html", {"url": PAGE_URL, "wait_for_selector": "a" * 501}),
-    ("mrscraper_scrape_html", {"url": PAGE_URL, "action": " "}),
+    ("mrscraper_scrape_html", {"url": PAGE_URL, "action": "product-flow"}),
+    ("mrscraper_scrape_markdown", {"url": PAGE_URL, "action": "docs"}),
     ("mrscraper_scrape_html", {"url": PAGE_URL, "screenshot": True}),
     ("mrscraper_scrape_html", {"url": PAGE_URL, "screenshot": "middle"}),
     ("mrscraper_scrape_html", {"url": PAGE_URL, "screenshot": "99x800"}),
