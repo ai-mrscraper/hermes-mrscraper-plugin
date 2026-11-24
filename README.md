@@ -10,8 +10,10 @@ This native Hermes plugin calls the MrScraper HTTP API directly and provides the
 seven standard MrScraper services as dedicated tools. Tool and parameter
 descriptions match the MrScraper CLI, Python SDK, Node SDK, LangChain integration,
 and MCP server; see the [API Reference](https://docs.mrscraper.com/docs/api/overview).
-Version 4.1.0 requires one secret, `MRSCRAPER_API_TOKEN`. The hosted MCP server is
-a separate connection.
+Version 4.1.0 requires one secret, `MRSCRAPER_API_TOKEN`. The
+[hosted MCP server](https://docs.mrscraper.com/docs/getting-started/mcp-server)
+is a separate connection that uses OAuth; installing this plugin does not
+configure it.
 
 ## Install or update
 
@@ -278,61 +280,6 @@ page retrieval does not create a persistent browser session. The standard web
 tools report explicit upstream failures and missing page content as errors,
 including when the API returns HTTP 200.
 
-## Migration from 4.0.0
-
-Version 4.1.0 keeps the seven tool names and aligns their parameters with the
-Scraper API reference. Update saved prompts and automations, then start a new
-Hermes session to refresh tool schemas.
-
-- Removed: `super`, `wait_until`, `proxy_country`, `proxy`, `return_cookie`,
-  `save_result`, and `token_cap` on the page tools, `html` on Scrape Markdown,
-  and `html`, `markdown`, and `warm_start` on Get screenshot. Page results are
-  always saved to the MrScraper dashboard, and `tokenCap` is never sent. Removed options are rejected
-  with an error that lists the supported options.
-- Get screenshot's `screenshot` still defaults to `full` and accepts `top`, and now
-  also accepts a custom viewport such as `1280x800` or `1920x1080-75`; any other
-  value, including `false`, is rejected.
-- New: `max_age` on the page tools, `action` on Scrape HTML and
-  Scrape Markdown, and `screenshot` on Scrape HTML (`false`, `full`, `top`, or a
-  custom viewport; setting one also sends `browserRendering=true`). Scrape JSON
-  now accepts `warm_start`, `block_resources`, and `wait_for_selector`.
-- `browser_rendering` is omitted unless set, so the API decides whether to use a
-  browser; `true` always renders and `false` never does.
-- Changed defaults: Scrape JSON's `html` is `true`,
-  `timeout` accepts up to 330 seconds, and `geo_code` and Web search's `country`
-  are omitted unless set.
-
-## Migration from 3.x
-
-Version 4.0.0 replaces the three 3.x tools with the seven standard services.
-Update saved prompts and automations, then start a new Hermes session to refresh
-tool schemas. The `mrscraper` provider name and `MRSCRAPER_API_TOKEN` stay the same.
-
-| 3.x tool | 4.0.0 tool |
-| --- | --- |
-| `mrscraper_account` | `mrscraper_status`, which returns the raw account response instead of a calculated summary and takes no `timeout`. |
-| `mrscraper_scraper_api` | `mrscraper_scrape_html`, `mrscraper_scrape_markdown`, or `mrscraper_get_screenshot`, depending on the output you need. |
-| `mrscraper_web_search` | `mrscraper_web_search` with `query`, `country`, and `num_results` instead of `url` and `region`. Search URLs are no longer parsed. |
-| — | New: `mrscraper_scrape_brand` and `mrscraper_scrape_json`. |
-
-Page option changes:
-
-- `home_page` is now `warm_start`. Get screenshot accepts it as well.
-- `screenshot` is now a separate tool with a `full` or `top` area.
-- The page timeout default is 300 seconds (was 120). `max_retries` is omitted by
-  default, meaning no limit (was 3); set it explicitly for bounded retries.
-- `geo_code` and `proxy_country` default to `us` and are sent in lowercase.
-- `browser_rendering` defaults to `false` instead of automatic fallback.
-- New: `wait_until`, `save_result`, and `return_cookie`.
-- Removed: `use_proxy`, `bypass_proxy`, `cookie_jar`, `headers`, `token_cap`, and
-  `stream`. They are rejected with an error that lists the supported options.
-- The API token is no longer sent as a `token` query parameter; authentication
-  uses headers only.
-
-The [hosted MCP server](https://docs.mrscraper.com/docs/getting-started/mcp-server)
-is a separate connection using OAuth and server-provided tool names. Installing
-this native plugin does not configure MCP.
-
 ## Service requests
 
 Page, brand, JSON, and search requests can consume paid MrScraper account quota.
@@ -348,7 +295,7 @@ account identity, plan, and usage fields. Use it when the agent needs that detai
 
 Use `hermes plugins validate .` for manifest/capability admission and the
 security scan. Current Hermes admission reports a compatibility warning for the
-internal website-policy helper also used by earlier versions; the plugin retains
+internal website-policy helper; the plugin retains
 that check and tests it against the target Hermes checkout. Run this repository's
 tests through a Hermes checkout's canonical runner:
 
