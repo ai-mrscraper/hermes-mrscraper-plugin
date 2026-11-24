@@ -4,3 +4,5 @@ __pycache__/
 .env
 .env.*
 !.env.example
+# Live API test results
+test-results/

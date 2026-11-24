@@ -1,5 +1,5 @@
 name: mrscraper
-version: 4.0.0
+version: 4.1.0
 description: MrScraper status, HTML, Markdown, screenshot, brand, JSON extraction, and web search tools for Hermes.
 author: MrScraper
 kind: standalone

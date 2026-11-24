@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, NoReturn
 from urllib.parse import urlencode
 
@@ -9,25 +10,33 @@ from tools.url_safety import is_safe_url
 from tools.website_policy import check_website_access
 
 DEFAULT_JSON_PROMPT = "Extract all data as complete as possible."
-WAIT_UNTIL_EVENTS = ("domcontentloaded", "load", "networkidle0", "networkidle2")
-SCREENSHOT_AREAS = ("full", "top")
 MAX_GET_URL_LENGTH = 8000
 TRANSPORT_GRACE_SECONDS = 30
 BRAND_AND_SEARCH_TIMEOUT = 120
 STATUS_TIMEOUT = 600
-
-_PAGE = (
-    "url", "timeout", "geo_code", "proxy_country", "super", "wait_until",
-    "proxy", "max_retries", "save_result",
+DEFAULT_TIMEOUT = 300
+MAX_TIMEOUT = 330
+MAX_SELECTOR_LENGTH = 500
+MAX_CACHE_AGE_MS = 604_800_000
+SCREENSHOT_PATTERN = r"^(false|full|top|[0-9]{3,4}x[0-9]{3,4}(-[0-9]{2,3})?)$"
+SCREENSHOT_AREA_PATTERN = r"^(full|top|[0-9]{3,4}x[0-9]{3,4}(-[0-9]{2,3})?)$"
+_AREA_HINT = (
+    "WIDTHxHEIGHT from 100 to 3840 pixels with an optional -ZOOM from 25 to 300, "
+    "such as 1280x800 or 1920x1080-75"
 )
-_LOADING = ("block_resources", "wait_for_selector", "return_cookie")
+# ASCII digits only, matched against the whole value (fullmatch) so a trailing newline or
+# non-ASCII digits are rejected.
+_VIEWPORT = re.compile(r"([0-9]{3,4})x([0-9]{3,4})(?:-([0-9]{2,3}))?")
+
+_LOADING = ("browser_rendering", "timeout", "warm_start", "block_resources", "wait_for_selector")
+_CACHE = ("geo_code", "max_age", "max_retries")
 SERVICE_OPTIONS: dict[str, tuple[str, ...]] = {
     "status": (),
-    "scrape_html": _PAGE + _LOADING + ("browser_rendering", "warm_start"),
-    "scrape_markdown": _PAGE + _LOADING + ("browser_rendering", "warm_start", "html"),
-    "get_screenshot": _PAGE + _LOADING + ("warm_start", "screenshot", "html", "markdown"),
+    "scrape_html": ("url", *_LOADING, *_CACHE, "screenshot"),
+    "scrape_markdown": ("url", *_LOADING, *_CACHE),
+    "get_screenshot": ("url", "screenshot", "timeout", "wait_for_selector", *_CACHE),
     "scrape_brand": ("url",),
-    "scrape_json": _PAGE + ("prompt", "browser_rendering", "html", "screenshot"),
+    "scrape_json": ("url", "prompt", "html", *_LOADING, *_CACHE, "screenshot"),
     "web_search": ("query", "country", "num_results"),
 }
 
@@ -56,6 +65,13 @@ def _boolean(args: dict[str, Any], name: str, default: bool) -> bool:
     return value
 
 
+def _optional_boolean(args: dict[str, Any], name: str) -> bool | None:
+    value = args.get(name)
+    if value is not None and not isinstance(value, bool):
+        _error(f"{name} must be a boolean.")
+    return value
+
+
 def _integer(
     args: dict[str, Any], name: str, default: int | None, minimum: int,
     maximum: int = 2**53 - 1,
@@ -77,22 +93,52 @@ def _optional_text(args: dict[str, Any], name: str) -> str | None:
     return value.strip()
 
 
-def _choice(args: dict[str, Any], name: str, choices: tuple[str, ...], default: str) -> str:
-    value = args.get(name)
-    if value is None:
-        return default
-    if value not in choices:
-        _error(f"{name} must be one of: {', '.join(choices)}.")
-    return value
+def _selector(args: dict[str, Any]) -> str | None:
+    selector = _optional_text(args, "wait_for_selector")
+    if selector is not None and len(selector) > MAX_SELECTOR_LENGTH:
+        _error(f"wait_for_selector must be at most {MAX_SELECTOR_LENGTH} characters.")
+    return selector
 
 
-def _country(args: dict[str, Any], name: str) -> str:
+def _country(args: dict[str, Any], name: str) -> str | None:
     value = args.get(name)
     if value is None:
-        return "us"
+        return None
     if not isinstance(value, str) or len(value) != 2 or not value.isascii() or not value.isalpha():
         _error(f"{name} must be a two-letter country code.")
     return value.lower()
+
+
+def _is_screenshot_area(value: Any) -> bool:
+    """True for full, top, or a WIDTHxHEIGHT viewport with an optional -ZOOM percent."""
+    if value in ("full", "top"):
+        return True
+    match = _VIEWPORT.fullmatch(value) if isinstance(value, str) else None
+    if not match:
+        return False
+    width, height = int(match[1]), int(match[2])
+    zoom = 100 if match[3] is None else int(match[3])
+    return 100 <= width <= 3840 and 100 <= height <= 3840 and 25 <= zoom <= 300
+
+
+def _screenshot_capture(args: dict[str, Any]) -> str | bool:
+    """Scrape HTML: accept false, full, top, or WIDTHxHEIGHT with an optional -ZOOM."""
+    value = args.get("screenshot")
+    if value is None or value is False or value == "false":
+        return False
+    if _is_screenshot_area(value):
+        return value
+    _error(f"screenshot must be false, full, top, or {_AREA_HINT}.")
+
+
+def _screenshot_area(args: dict[str, Any]) -> str:
+    """Get screenshot: accept full (the default), top, or WIDTHxHEIGHT with an optional -ZOOM."""
+    value = args.get("screenshot")
+    if value is None:
+        return "full"
+    if _is_screenshot_area(value):
+        return value
+    _error(f"screenshot must be full, top, or {_AREA_HINT}.")
 
 
 def _page_url(args: dict[str, Any]) -> str:
@@ -108,29 +154,27 @@ def _page_url(args: dict[str, Any]) -> str:
     return url
 
 
-def _page_params(args: dict[str, Any], *, loading: bool) -> dict[str, Any]:
-    params: dict[str, Any] = {
-        "url": _page_url(args),
-        "super": _boolean(args, "super", False),
-        "waitUntil": _choice(args, "wait_until", WAIT_UNTIL_EVENTS, "domcontentloaded"),
-        "timeout": _integer(args, "timeout", 300, 1, 300),
-        "geoCode": _country(args, "geo_code"),
-        "proxyCountry": _country(args, "proxy_country"),
-        "saveResult": _boolean(args, "save_result", False),
-    }
-    proxy = _optional_text(args, "proxy")
-    if proxy is not None:
-        params["proxy"] = proxy
-    max_retries = _integer(args, "max_retries", None, 0)
-    if max_retries is not None:
-        params["maxRetries"] = max_retries
+def _shared(args: dict[str, Any], *, loading: bool) -> dict[str, Any]:
+    """Validate the shared controls and return them in the documented request order."""
+    fields: dict[str, Any] = {}
     if loading:
-        params["blockResources"] = _boolean(args, "block_resources", False)
-        selector = _optional_text(args, "wait_for_selector")
-        if selector is not None:
-            params["waitForSelector"] = selector
-        params["returnCookie"] = _boolean(args, "return_cookie", False)
-    return params
+        fields["browserRendering"] = _optional_boolean(args, "browser_rendering")
+    fields["timeout"] = _integer(args, "timeout", DEFAULT_TIMEOUT, 1, MAX_TIMEOUT)
+    if loading:
+        fields["warmStart"] = _boolean(args, "warm_start", False)
+        fields["blockResources"] = _boolean(args, "block_resources", False)
+    fields["waitForSelector"] = _selector(args)
+    fields["geoCode"] = _country(args, "geo_code")
+    # Results are always saved to the dashboard; saveResult is not an option.
+    fields["saveResult"] = True
+    fields["maxAge"] = _integer(args, "max_age", 0, 0, MAX_CACHE_AGE_MS)
+    fields["maxRetries"] = _integer(args, "max_retries", None, 0)
+    return fields
+
+
+def _compact(params: dict[str, Any]) -> dict[str, Any]:
+    """Leave unset optional fields off the wire."""
+    return {key: value for key, value in params.items() if value is not None}
 
 
 def encode(params: dict[str, Any]) -> dict[str, str]:
@@ -144,31 +188,27 @@ def encode(params: dict[str, Any]) -> dict[str, str]:
 def build_page_request(service: str, args: dict[str, Any]) -> tuple[dict[str, str], int]:
     """Build Scrape HTML, Scrape Markdown, or Get screenshot GET query parameters."""
     check_options(service, args)
-    params = _page_params(args, loading=True)
+    url = _page_url(args)
     if service == "scrape_html":
-        params.update(
-            browserRendering=_boolean(args, "browser_rendering", False),
-            warmStart=_boolean(args, "warm_start", False),
-            html=True, markdown=False, screenshot=False,
-        )
+        shared = _shared(args, loading=True)
+        capture = _screenshot_capture(args)
+        if capture is not False:
+            # A screenshot needs a rendered page, so it always sends browserRendering=true.
+            shared["browserRendering"] = True
+        params = {"url": url, "html": True, "markdown": False, **shared, "screenshot": capture}
     elif service == "scrape_markdown":
-        html = _boolean(args, "html", False)
-        params.update(
-            # The API needs browser rendering to return HTML and Markdown together.
-            browserRendering=html or _boolean(args, "browser_rendering", False),
-            warmStart=_boolean(args, "warm_start", False),
-            html=html, markdown=True, screenshot=False,
-        )
+        params = {
+            "url": url, "markdown": True, "html": False, "screenshot": False,
+            **_shared(args, loading=True),
+        }
     elif service == "get_screenshot":
-        params.update(
-            browserRendering=True,
-            warmStart=_boolean(args, "warm_start", False),
-            screenshot=_choice(args, "screenshot", SCREENSHOT_AREAS, "full"),
-            html=_boolean(args, "html", True),
-            markdown=_boolean(args, "markdown", False),
-        )
+        params = {
+            "url": url, "screenshot": _screenshot_area(args), "html": False, "markdown": False,
+            "browserRendering": True, **_shared(args, loading=False),
+        }
     else:
         raise ValueError(f"Unsupported page service: {service}")
+    params = _compact(params)
     return encode(params), params["timeout"] + TRANSPORT_GRACE_SECONDS
 
 
@@ -177,19 +217,20 @@ def build_json_request(
 ) -> tuple[str, dict[str, str], dict[str, str] | None, int]:
     """Scrape JSON uses GET unless the encoded URL exceeds 8,000 characters."""
     check_options("scrape_json", args)
+    url = _page_url(args)
     prompt = args.get("prompt")
     if prompt is None:
         prompt = DEFAULT_JSON_PROMPT
     if not isinstance(prompt, str) or not prompt.strip():
         _error("prompt must be a non-empty string.")
-    params = _page_params(args, loading=False)
-    params.update(
-        browserRendering=_boolean(args, "browser_rendering", False),
-        html=_boolean(args, "html", False),
-        screenshot=_boolean(args, "screenshot", False),
-        agent="general",
-        prompt=prompt,
-    )
+    params = _compact({
+        "url": url,
+        "prompt": prompt,
+        "agent": "general",
+        "html": _boolean(args, "html", True),
+        **_shared(args, loading=True),
+        "screenshot": _boolean(args, "screenshot", False),
+    })
     query = encode(params)
     timeout = params["timeout"] + TRANSPORT_GRACE_SECONDS
     if len(f"{base_url}?{urlencode(query)}") <= MAX_GET_URL_LENGTH:
@@ -209,10 +250,10 @@ def build_search_request(args: dict[str, Any]) -> tuple[dict[str, str], int]:
     query = args.get("query")
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 1000:
         _error("query must be 1 to 1000 characters.")
-    params = {
+    params = _compact({
         "action": "websearch",
         "query": query.strip(),
         "country": _country(args, "country"),
         "numResults": _integer(args, "num_results", 10, 10, 100),
-    }
+    })
     return encode(params), BRAND_AND_SEARCH_TIMEOUT

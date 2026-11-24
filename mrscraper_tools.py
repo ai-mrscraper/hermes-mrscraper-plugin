@@ -1,8 +1,8 @@
 """The seven native tool surfaces for MrScraper's direct HTTP API.
 
 Tool and parameter descriptions follow the MrScraper standard service reference
-shared by the CLI, SDKs, and integrations. Get screenshot additionally accepts
-``warm_start``.
+shared by the CLI, SDKs, and integrations. Each tool offers only the parameters
+the Scraper API reference documents.
 """
 
 from __future__ import annotations
@@ -11,7 +11,14 @@ import copy
 from typing import Any
 
 from .client import MrScraperClient, MrScraperError
-from .request_options import DEFAULT_JSON_PROMPT, SCREENSHOT_AREAS, WAIT_UNTIL_EVENTS
+from .request_options import (
+    DEFAULT_JSON_PROMPT,
+    MAX_CACHE_AGE_MS,
+    MAX_SELECTOR_LENGTH,
+    MAX_TIMEOUT,
+    SCREENSHOT_AREA_PATTERN,
+    SCREENSHOT_PATTERN,
+)
 from tools.registry import tool_error, tool_result
 
 
@@ -37,47 +44,65 @@ def _schema(name: str, description: str, properties: dict, required: list[str]) 
     }
 
 
-def _boolean(description: str, default: bool = False) -> dict:
-    return {"type": "boolean", "default": default, "description": description}
+def _boolean(description: str, default: bool | None = False) -> dict:
+    schema: dict[str, Any] = {"type": "boolean", "description": description}
+    if default is not None:
+        schema["default"] = default
+    return schema
 
 
 def _country(description: str) -> dict:
-    return {"type": "string", "pattern": "^[A-Za-z]{2}$", "default": "us",
-            "description": description}
+    return {"type": "string", "pattern": "^[A-Za-z]{2}$", "description": description}
 
 
 URL = {"type": "string", "description": "Absolute HTTP or HTTPS URL of the page to process."}
-PAGE = {
-    "url": URL,
-    "timeout": {"type": "integer", "minimum": 1, "maximum": 300, "default": 300,
-                "description": "Page load timeout in seconds, from 1 to 300. "
-                               "The HTTP request allows 30 additional seconds."},
+BROWSER_RENDERING = _boolean(
+    "Whether to load the page in a browser: true always does and false never does. "
+    "Omit it to load the page without a browser first and switch to a browser "
+    "automatically if the request is blocked.",
+    default=None,
+)
+TIMEOUT = {"type": "integer", "minimum": 1, "maximum": MAX_TIMEOUT, "default": 300,
+           "description": "Maximum seconds to wait for the scrape, from 1 to 330. "
+                          "The HTTP request allows 30 additional seconds."}
+WARM_START = _boolean(
+    "Whether to open the site's home page first to warm the session before loading the "
+    "target URL.")
+BLOCK_RESOURCES = _boolean(
+    "Whether to block images, fonts, and stylesheets while loading the page.")
+WAIT_FOR_SELECTOR = {"type": "string", "maxLength": MAX_SELECTOR_LENGTH,
+                     "description": "CSS selector or text to wait for on the page before "
+                                    "returning the result, up to 500 characters."}
+CACHE = {
     "geo_code": _country("Two-letter country code to load the page from, sent in lowercase."),
-    "proxy_country": _country("Two-letter country code of the proxy server, sent in lowercase."),
-    "super": _boolean("Whether to route the request through real devices."),
-    "wait_until": {"type": "string", "enum": list(WAIT_UNTIL_EVENTS),
-                   "default": "domcontentloaded",
-                   "description": "Navigation completion event to wait for: "
-                                  "domcontentloaded, load, networkidle0, or networkidle2."},
-    "proxy": {"type": "string", "description": "Custom proxy URL used to load the page."},
+    "max_age": {"type": "integer", "minimum": 0, "maximum": MAX_CACHE_AGE_MS, "default": 0,
+                "description": "Return a cached result of the same request when it is newer "
+                               "than the selected age. A cached result costs the same tokens "
+                               "as the original scrape."},
     "max_retries": {"type": "integer", "minimum": 0,
                     "description": "Maximum number of retries, as a nonnegative integer. "
                                    "Omit this parameter for no limit."},
-    "save_result": _boolean("Whether to save the result to the dashboard Result tab."),
 }
 LOADING = {
-    "block_resources": _boolean(
-        "Whether to block images, fonts, and stylesheets while loading the page."),
-    "wait_for_selector": {"type": "string",
-                          "description": "Wait for the page to contain the specified CSS "
-                                         "selector before returning the result."},
-    "return_cookie": _boolean("Whether to include browser session cookies in the response."),
+    "browser_rendering": BROWSER_RENDERING,
+    "timeout": TIMEOUT,
+    "warm_start": WARM_START,
+    "block_resources": BLOCK_RESOURCES,
+    "wait_for_selector": WAIT_FOR_SELECTOR,
 }
-BROWSER_RENDERING = _boolean(
-    "Whether to render the page in a browser before returning the result.")
-WARM_START = _boolean(
-    "Whether to enable warm start for more reliable scraping, at the cost of additional latency.")
-INCLUDE_HTML = "Whether to include the page HTML in the response."
+SCREENSHOT_CAPTURE = {
+    "type": "string", "pattern": SCREENSHOT_PATTERN, "default": "false",
+    "description": "Screenshot to capture with the HTML: false for none, full for the entire "
+                   "page, top for the first viewport, or a WIDTHxHEIGHT viewport from 100 to "
+                   "3840 pixels with an optional -ZOOM percent from 25 to 300, such as 1280x800 "
+                   "or 1920x1080-75. Setting a screenshot also sends browserRendering=true.",
+}
+SCREENSHOT_AREA = {
+    "type": "string", "pattern": SCREENSHOT_AREA_PATTERN, "default": "full",
+    "description": "Screenshot area to capture: full for the entire scroll height, top for the "
+                   "first viewport, or a WIDTHxHEIGHT viewport from 100 to 3840 pixels with an "
+                   "optional -ZOOM percent from 25 to 300, such as 1280x800 or 1920x1080-75.",
+}
 
 SERVICES = (
     ("mrscraper_status", "status",
@@ -86,23 +111,17 @@ SERVICES = (
      {}, []),
     ("mrscraper_scrape_html", "scrape_html",
      "Retrieve the raw HTML of a page. Browser rendering is optional.",
-     {**PAGE, **LOADING, "browser_rendering": BROWSER_RENDERING, "warm_start": WARM_START},
+     {"url": URL, **LOADING, **CACHE, "screenshot": SCREENSHOT_CAPTURE},
      ["url"]),
     ("mrscraper_scrape_markdown", "scrape_markdown",
-     "Retrieve a page as Markdown. Including HTML also enables browser rendering and returns "
-     "both outputs as JSON.",
-     {**PAGE, **LOADING, "browser_rendering": BROWSER_RENDERING, "warm_start": WARM_START,
-      "html": _boolean(INCLUDE_HTML)},
+     "Retrieve a page as clean Markdown. Browser rendering is optional.",
+     {"url": URL, **LOADING, **CACHE},
      ["url"]),
     ("mrscraper_get_screenshot", "get_screenshot",
-     "Capture a base64 screenshot of the full page or top viewport. "
-     "Browser rendering is always enabled.",
-     {**PAGE, **LOADING, "warm_start": WARM_START,
-      "screenshot": {"type": "string", "enum": list(SCREENSHOT_AREAS), "default": "full",
-                     "description": "Screenshot area to capture: full for the entire page "
-                                    "or top for the top viewport."},
-      "html": _boolean(INCLUDE_HTML, True),
-      "markdown": _boolean("Whether to include the page Markdown in the response.")},
+     "Capture a base64 PNG screenshot of the full page, the first viewport, or a custom "
+     "viewport. Browser rendering is always enabled.",
+     {"url": URL, "screenshot": SCREENSHOT_AREA, "timeout": TIMEOUT,
+      "wait_for_selector": WAIT_FOR_SELECTOR, **CACHE},
      ["url"]),
     ("mrscraper_scrape_brand", "scrape_brand",
      "Extract a website's colors, typography, logos, and social links as JSON.",
@@ -110,12 +129,12 @@ SERVICES = (
     ("mrscraper_scrape_json", "scrape_json",
      "Extract structured JSON from a page using a natural-language prompt. "
      "Append Json Schema: and a JSON schema to shape the output.",
-     {**PAGE,
+     {"url": URL,
       "prompt": {"type": "string", "default": DEFAULT_JSON_PROMPT,
                  "description": "Instructions describing the data to extract. "
                                 "Append Json Schema: and a JSON schema to shape the output."},
-      "browser_rendering": BROWSER_RENDERING,
-      "html": _boolean(INCLUDE_HTML),
+      "html": _boolean("Whether to include the page HTML in the response.", True),
+      **LOADING, **CACHE,
       "screenshot": _boolean("Whether to include a base64 screenshot in the response.")},
      ["url"]),
     ("mrscraper_web_search", "web_search",
